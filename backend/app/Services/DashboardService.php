@@ -3,7 +3,6 @@
 namespace App\Services;
 
 use App\Repositories\Contracts\DashboardRepositoryInterface;
-use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Facades\Cache;
 
 class DashboardService
@@ -48,13 +47,41 @@ class DashboardService
     }
 
     /**
-     * Ranking de tentativas paginado.
+     * Ranking de tentativas paginado, já como estrutura serializável
+     * (linhas + metadados de paginação). Cacheamos o DTO, nunca o objeto
+     * paginador — que não sobrevive à (des)serialização no cache.
      *
-     * @return LengthAwarePaginator<int, \App\Models\ExamAttempt>
+     * @return array{data: array<int, array<string, mixed>>, meta: array<string, int>}
      */
-    public function ranking(int $perPage, int $page): LengthAwarePaginator
+    public function ranking(int $perPage, int $page): array
     {
-        return $this->remember("ranking:{$perPage}:{$page}", fn (): LengthAwarePaginator => $this->dashboard->ranking($perPage, $page));
+        return $this->remember("ranking:{$perPage}:{$page}", function () use ($perPage, $page): array {
+            $paginator = $this->dashboard->ranking($perPage, $page);
+            $start = $paginator->firstItem() ?? 0;
+
+            $rows = [];
+            foreach ($paginator->items() as $index => $attempt) {
+                $rows[] = [
+                    'position' => $start + $index,
+                    'attempt_id' => $attempt->id,
+                    'student_name' => $attempt->student->name,
+                    'exam_title' => $attempt->exam->title,
+                    'score' => $attempt->score,
+                    'total_questions' => $attempt->total_questions,
+                    'percentage' => (float) $attempt->percentage,
+                ];
+            }
+
+            return [
+                'data' => $rows,
+                'meta' => [
+                    'current_page' => $paginator->currentPage(),
+                    'last_page' => $paginator->lastPage(),
+                    'per_page' => $paginator->perPage(),
+                    'total' => $paginator->total(),
+                ],
+            ];
+        });
     }
 
     /**
