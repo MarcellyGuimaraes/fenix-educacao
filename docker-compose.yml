@@ -1,0 +1,102 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: fenix_postgres
+    environment:
+      POSTGRES_DB: ${DB_DATABASE:-fenix}
+      POSTGRES_USER: ${DB_USERNAME:-fenix}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-secret}
+    ports:
+      # Host port defaults to 5434 to avoid clashing with a local Postgres on 5432/5433.
+      # Internal port is always 5432 (used by the app over the compose network).
+      - "${DB_FORWARD_PORT:-5434}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USERNAME:-fenix} -d ${DB_DATABASE:-fenix}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - fenix
+
+  redis:
+    image: redis:7-alpine
+    container_name: fenix_redis
+    ports:
+      - "${REDIS_FORWARD_PORT:-6379}:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - fenix
+
+  app:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: fenix_app
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      DB_CONNECTION: pgsql
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_DATABASE: ${DB_DATABASE:-fenix}
+      DB_USERNAME: ${DB_USERNAME:-fenix}
+      DB_PASSWORD: ${DB_PASSWORD:-secret}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      CACHE_STORE: redis
+      APP_ENV: local
+    volumes:
+      - ./backend:/var/www/html
+    expose:
+      - "9000"
+    networks:
+      - fenix
+
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: fenix_nginx
+    depends_on:
+      - app
+    ports:
+      - "${APP_PORT:-8080}:80"
+    volumes:
+      - ./backend:/var/www/html
+      - ./backend/docker/nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+    networks:
+      - fenix
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: fenix_frontend
+    depends_on:
+      - nginx
+    environment:
+      VITE_API_URL: ${VITE_API_URL:-http://localhost:8080/api}
+    ports:
+      - "${FRONTEND_PORT:-5173}:5173"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    networks:
+      - fenix
+
+volumes:
+  postgres_data:
+  redis_data:
+
+networks:
+  fenix:
+    driver: bridge
