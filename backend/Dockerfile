@@ -8,13 +8,17 @@ RUN apk add --no-cache \
     libzip-dev \
     icu-dev \
     postgresql-dev \
+    sqlite-dev \
     linux-headers \
     $PHPIZE_DEPS
 
 # PHP extensions
-RUN docker-php-ext-install pdo pdo_pgsql zip intl bcmath \
+RUN docker-php-ext-install pdo pdo_pgsql pdo_sqlite zip intl bcmath \
     && pecl install redis \
     && docker-php-ext-enable redis
+
+# PCOV: driver de cobertura de testes
+RUN pecl install pcov && docker-php-ext-enable pcov
 
 # Composer
 COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
