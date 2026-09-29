@@ -33,5 +33,8 @@ php artisan migrate --force --seed
 echo "==> Clearing config cache..."
 php artisan config:clear
 
+echo "==> Generating API docs (Swagger)..."
+php artisan l5-swagger:generate || echo "!! Swagger generation skipped"
+
 echo "==> Starting: $@"
 exec "$@"
