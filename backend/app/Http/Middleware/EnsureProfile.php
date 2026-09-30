@@ -4,6 +4,7 @@ namespace App\Http\Middleware;
 
 use App\Models\Student;
 use App\Models\Teacher;
+use App\Support\Identifier;
 use Closure;
 use Illuminate\Http\Request;
 use Symfony\Component\HttpFoundation\Response;
@@ -24,10 +25,12 @@ class EnsureProfile
             abort(403, 'Perfil não autorizado para esta ação.');
         }
 
+        // Id malformado é tratado como perfil inexistente, sem ir ao banco.
         $id = $request->header('X-User-Id');
+        $id = Identifier::isValid($id) ? (int) $id : null;
 
         if ($role === 'teacher') {
-            $teacher = Teacher::find($id);
+            $teacher = $id ? Teacher::find($id) : null;
             if (! $teacher) {
                 abort(401, 'Professor não identificado.');
             }
@@ -35,7 +38,7 @@ class EnsureProfile
         }
 
         if ($role === 'student') {
-            $student = Student::find($id);
+            $student = $id ? Student::find($id) : null;
             if (! $student) {
                 abort(401, 'Aluno não identificado.');
             }

@@ -26,8 +26,9 @@ async function remove(exam) {
   try {
     await api.delete(`/exams/${exam.id}`)
     await load()
-  } catch {
-    alert('Não foi possível excluir a prova.')
+  } catch (e) {
+    // 403 (prova de outro professor): mostra o motivo retornado pela API.
+    alert(e.response?.status === 403 ? e.response.data.message : 'Não foi possível excluir a prova.')
   }
 }
 

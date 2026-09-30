@@ -17,11 +17,13 @@ class ExamService
     ) {}
 
     /**
+     * Provas do professor (o professor só vê as próprias provas).
+     *
      * @return Collection<int, Exam>
      */
-    public function list(): Collection
+    public function list(Teacher $teacher): Collection
     {
-        return $this->exams->allWithCounts();
+        return $this->exams->forTeacherWithCounts($teacher->id);
     }
 
     public function find(Exam $exam): Exam

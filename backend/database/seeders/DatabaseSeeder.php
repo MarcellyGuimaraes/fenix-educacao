@@ -11,7 +11,7 @@ use Illuminate\Database\Seeder;
 class DatabaseSeeder extends Seeder
 {
     /**
-     * Popula o banco com dados base: professor, alunos e provas de exemplo.
+     * Popula o banco com dados base: professores, alunos e provas de exemplo.
      */
     public function run(): void
     {
@@ -68,6 +68,31 @@ class DatabaseSeeder extends Seeder
                     ['text' => 'for', 'is_correct' => false],
                     ['text' => 'array', 'is_correct' => false],
                     ['text' => 'function', 'is_correct' => false],
+                ],
+            ],
+        ]);
+
+        // Segundo professor, com prova própria: cada professor vê apenas as
+        // próprias provas e métricas.
+        $otherTeacher = Teacher::firstOrCreate(['name' => 'Prof. Bruno Costa']);
+
+        $this->createExam($otherTeacher, 'Prova de História do Brasil', 'Fatos marcantes.', [
+            [
+                'statement' => 'Em que ano foi proclamada a independência do Brasil?',
+                'options' => [
+                    ['text' => '1500', 'is_correct' => false],
+                    ['text' => '1822', 'is_correct' => true],
+                    ['text' => '1889', 'is_correct' => false],
+                    ['text' => '1930', 'is_correct' => false],
+                ],
+            ],
+            [
+                'statement' => 'Qual evento marcou o fim do Império no Brasil?',
+                'options' => [
+                    ['text' => 'A Proclamação da República', 'is_correct' => true],
+                    ['text' => 'A Abolição da Escravatura', 'is_correct' => false],
+                    ['text' => 'A Revolução de 1930', 'is_correct' => false],
+                    ['text' => 'A chegada da família real', 'is_correct' => false],
                 ],
             ],
         ]);

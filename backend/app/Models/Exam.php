@@ -18,6 +18,16 @@ class Exam extends Model
         'description',
     ];
 
+    public const NOT_OWNER_MESSAGE = 'Esta prova pertence a outro professor.';
+
+    /**
+     * Indica se o professor é o autor da prova.
+     */
+    public function isOwnedBy(Teacher $teacher): bool
+    {
+        return (int) $this->teacher_id === (int) $teacher->id;
+    }
+
     /**
      * Professor autor da prova.
      *

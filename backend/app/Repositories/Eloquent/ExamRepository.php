@@ -8,9 +8,10 @@ use Illuminate\Database\Eloquent\Collection;
 
 class ExamRepository implements ExamRepositoryInterface
 {
-    public function allWithCounts(): Collection
+    public function forTeacherWithCounts(int $teacherId): Collection
     {
         return Exam::query()
+            ->where('teacher_id', $teacherId)
             ->withCount(['questions', 'attempts'])
             ->latest()
             ->get();

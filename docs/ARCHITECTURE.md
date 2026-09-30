@@ -78,7 +78,8 @@ porta 5173) com `./frontend` montado.
 
 | Camada | Componentes | Responsabilidade |
 |---|---|---|
-| Middleware | `EnsureProfile` | Único ponto de identidade (perfil vem por header) |
+| Middleware | `EnsureProfile`, `EnsureExamOwner` (`exam.owner`) | Identidade (perfil vem por header; `X-User-Id` malformado → 401) e dono da prova (403 em show/update/destroy, antes da validação) |
+| Rotas | `Route::pattern` (`App\Support\Identifier`) | `{exam}`/`{attempt}` só casam com inteiros positivos de até 18 dígitos → 404, nunca 500 |
 | Controllers | `ExamController`, `DashboardController`, `StudentExamController`, `AttemptController`, `ProfileController` | Orquestração HTTP |
 | Validação | `ExamRequest`, `SubmitAttemptRequest` | Formato e regra de "exatamente 1 correta" |
 | Services | `ExamService`, `ExamAttemptService`, `DashboardService` | CRUD de prova, correção automática, métricas e cache |
@@ -98,7 +99,7 @@ porta 5173) com `./frontend` montado.
         HomeView ................ escolhe o perfil (GET /teachers, /students)
         teacher/ExamListView .... GET /exams, DELETE /exams/{id}
         teacher/ExamFormView .... GET/POST/PUT /exams
-        teacher/DashboardView ... GET /dashboard/summary, /dashboard/ranking
+        teacher/DashboardView ... GET /dashboard/summary, /exams, /students, /ranking?exam_id
         student/ExamListView .... GET /student/exams
         student/ExamTakeView .... GET /student/exams/{id}, POST .../attempts
         student/ResultView ...... GET /student/attempts/{id}
@@ -132,6 +133,7 @@ porta 5173) com `./frontend` montado.
 
 ```
 ExamFormView --POST/PUT /exams--> EnsureProfile(teacher)
+  -> (show/PUT/DELETE) EnsureExamOwner: prova de outro professor --> 403
   -> ExamRequest: title, questions[>=1], options[>=2], exatamente 1 is_correct
                                                    (422 se a validação falhar)
   -> ExamService.create/update  [DB::transaction]
@@ -183,16 +185,23 @@ ExamAttemptService.submit
 ```
 DashboardView
   | GET /dashboard/summary
-  | GET /dashboard/ranking?page&per_page (per_page limitado a 1..50)
+  | GET /dashboard/exams                 (métricas por prova; alimenta o filtro)
+  | GET /dashboard/students?page&per_page (aluno × média)
+  | GET /dashboard/ranking?exam_id&page&per_page (per_page limitado a 1..50)
+  |     exam_id: não inteiro -> 422, inexistente -> 404, de outro professor -> 403
   v
-DashboardService.remember("dashboard:<key>", TTL 300s, tag "dashboard")
+DashboardService.remember("dashboard:<teacher>:<key>", TTL 300s, tag "dashboard")
    HIT  -> Redis
-   MISS -> DashboardRepository
+   MISS -> DashboardRepository (tudo restrito às provas do professor:
+                                exam_id IN (SELECT id FROM exams WHERE teacher_id = ?))
              averagePercentage / totalAttempts
              best  = ORDER BY percentage DESC, score DESC, submitted_at ASC
              worst = ORDER BY percentage ASC ...
-             ranking = mesma ordenação canônica, paginada
-           -> converte para DTO (array serializável) -> Redis
+             ranking = mesma ordenação canônica, paginada, filtro opcional por prova
+             examMetrics = exams + COUNT/AVG/MAX/MIN das tentativas (null sem tentativas)
+             studentAverages = GROUP BY aluno: COUNT, AVG; ordem: média desc, nome
+           -> converte para DTO (array serializável; diferença = média do aluno
+              - média geral) -> Redis
 Invalidação: ExamAttemptService.submit (nova tentativa) e
              ExamService.delete (tentativas removidas em cascata)
 ```
@@ -202,8 +211,10 @@ Invalidação: ExamAttemptService.submit (nova tentativa) e
 ```
 HomeView -> escolhe perfil -> session.enter(role, id, name) -> localStorage
 Toda requisição: Axios adiciona os headers X-User-Role e X-User-Id
-EnsureProfile: role diferente -> 403; id inexistente -> 401
-Posse do recurso: AttemptController verifica attempt.student_id == aluno (403)
+EnsureProfile: role diferente -> 403; id malformado ou inexistente -> 401
+Rotas: {exam}/{attempt} fora do formato de id -> 404 (nunca chega ao banco)
+Posse do recurso: AttemptController verifica attempt.student_id == aluno (403);
+                  EnsureExamOwner verifica exam.teacher_id == professor (403)
 ```
 
 ## 5. Rastreabilidade: requisito do teste e onde ele é garantido
@@ -218,10 +229,12 @@ Posse do recurso: AttemptController verifica attempt.student_id == aluno (403)
 | Correção automática | `ExamAttemptService::submit`, no servidor |
 | Pontuação e percentual | `exam_attempts.score/percentage` + `ResultView` |
 | Dashboard: média, Top 1, ranking paginado | `DashboardService` / `DashboardRepository` / `DashboardView` |
+| Dashboard: média por prova, aluno × média, ranking filtrável | `GET /dashboard/exams`, `/dashboard/students`, `/dashboard/ranking?exam_id` + tabelas e filtro no `DashboardView` |
+| Professor só gerencia e mede as próprias provas | `ExamRepository::forTeacherWithCounts`, `EnsureExamOwner` (403), dashboard restrito por `teacher_id` com cache por professor |
 | Redis para cache | Tag `dashboard`, TTL 300s, invalidação na submissão e na exclusão de prova |
 | Docker Compose | 5 serviços + entrypoint automatizado; modo padrão otimizado e modo dev opcional |
 | API REST organizada | `apiResource` + prefixo `/student` + Swagger |
-| Validação e tratamento de erros | FormRequests, 401/403/404/409/422 em JSON |
+| Validação e tratamento de erros | FormRequests, 401/403/404/409/422 em JSON; ids inválidos nunca geram 500 |
 | Front consome a API | Vue + Axios |
 | 2 acessos sem login | Headers + `EnsureProfile` (simplificação consciente, documentada no README) |
 
