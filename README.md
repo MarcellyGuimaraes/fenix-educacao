@@ -2,8 +2,9 @@
 
 Aplicação fullstack de **provas online**: professores criam provas de múltipla
 escolha, alunos respondem e recebem **correção automática**, e um **dashboard**
-mostra o desempenho da turma (média geral e por prova, melhor e pior pontuação,
-média de cada aluno e ranking filtrável por prova). Cada professor vê apenas as
+mostra o desempenho da turma (média das provas, média por prova, melhor e pior
+pontuação, desempenho de cada aluno comparado à média de cada prova e ranking
+filtrável por prova). Cada professor vê apenas as
 próprias provas e métricas.
 
 Projeto do desafio técnico **Fênix – Desenvolvedor**.
@@ -139,6 +140,11 @@ Dados de exemplo do seeder:
 | Professor | Prof. Bruno Costa | História do Brasil |
 | Aluno | João Silva, Maria Oliveira, Pedro Santos, Carla Lima, Lucas Rocha | — |
 
+O seeder também registra **8 tentativas de exemplo** (pela mesma correção da
+API), para o dashboard já abrir com dados. A prova de Conhecimentos Gerais é a
+"difícil": a Maria só fez essa prova e foi a melhor nela, então aparece acima da
+média no *Aluno × média* mesmo sem ter a maior média absoluta.
+
 > Entrar como cada professor mostra o isolamento: um não vê as provas nem as
 > métricas do outro.
 
@@ -215,7 +221,7 @@ Principais endpoints (detalhes e schemas no Swagger):
 | GET | `/api/student/attempts/{attempt}` | aluno |
 
 Respostas padronizadas e tratamento de erros: `422` (validação), `404` (não
-encontrado), `409` (tentativa duplicada ou edição de prova já respondida),
+encontrado), `409` (tentativa duplicada ou edição/exclusão de prova já respondida),
 `403`/`401` (perfil).
 
 > **Cada professor enxerga apenas o que é seu.** A listagem de provas e todas as
@@ -227,9 +233,26 @@ encontrado), `409` (tentativa duplicada ou edição de prova já respondida),
 > positivo responde `401`; um `{exam}`/`{attempt}` inválido na URL (letras, zero,
 > número grande demais) responde `404`. O valor nem chega ao banco.
 
-> Uma prova que já tem tentativas **não pode ser editada** (`PUT` responde `409`):
-> recriar as questões apagaria as respostas dos alunos. Para corrigi-la, exclua e
-> recrie a prova.
+> Uma prova que já tem tentativas **não pode ser editada nem excluída** (`PUT` e
+> `DELETE` respondem `409`): as duas operações apagariam as respostas dos alunos,
+> e o histórico de tentativas precisa ser preservado. O banco reforça a regra com
+> uma FK restritiva (`exam_attempts.exam_id` → `restrictOnDelete`). Para corrigir
+> uma prova já respondida, crie uma nova versão.
+
+### Métricas do dashboard
+
+| Métrica | Como é calculada |
+|---|---|
+| **Média das provas** (`exams_average_percentage`) | média das médias de cada prova com tentativas: cada prova tem o mesmo peso |
+| Média por tentativa (`average_percentage`) | média de todas as tentativas: provas com mais tentativas pesam mais |
+| Melhor (Top 1) / pior | maior / menor percentual; empate → maior acerto, depois envio mais antigo |
+| Média por prova | `AVG`/`MAX`/`MIN` do percentual por prova (provas sem tentativas aparecem com `—`) |
+| **Aluno × média** (`difference_from_exam_average`) | para cada tentativa, *percentual do aluno − média daquela prova*; o valor é a média desses desvios |
+
+A comparação do aluno é feita **prova a prova** de propósito: comparar a média
+do aluno com uma média geral mistura provas de dificuldades diferentes, e um
+aluno que fez só a prova mais difícil (e foi o melhor nela) apareceria "abaixo
+da média".
 
 ---
 
@@ -256,8 +279,9 @@ docker compose exec app php artisan test
 docker compose exec -e PHP_PCOV_ENABLED=1 app php artisan test --coverage
 ```
 
-Cobrem: CRUD de provas e validações, fluxo do aluno (responder, correção,
-tentativa única, resultado), autorização por perfil e por dono do recurso
+Cobrem: CRUD de provas e validações (inclusive exclusão bloqueada de prova
+respondida), fluxo do aluno (responder, correção, tentativa única, resultado,
+correção contra as questões lidas depois da trava da prova), autorização por perfil e por dono do recurso
 (inclusive dono da prova), ids inválidos (401/404, nunca 500) e o dashboard
 (métricas gerais e por prova, aluno × média, ranking com filtro, isolamento
 entre professores e invalidação de cache).
@@ -297,7 +321,16 @@ docker compose exec app php artisan cache:clear
   Capturar o erro do banco dependeria do driver (o SQLite dos testes nem falha)
   e mascararia erros reais.
 - **Métricas agregadas no banco**: média por prova e aluno × média saem de
-  `COUNT`/`AVG`/`MAX`/`MIN` em uma query cada, não de laços em PHP.
+  `COUNT`/`AVG`/`MAX`/`MIN` em uma query cada, não de laços em PHP. O desvio de
+  cada aluno junta as tentativas a uma subquery com a média de cada prova.
+- **Exclusão bloqueada em vez de soft delete**: prova respondida não pode ser
+  excluída (mesma regra da edição). *Soft delete* exigiria `withTrashed()` no
+  resultado do aluno, no dashboard e nas rotas, e deixaria em aberto se a prova
+  "excluída" continua nas métricas.
+- **Correção dentro da transação**: a submissão trava a linha da prova, confere
+  se o aluno já respondeu, lê as questões e corrige, tudo na mesma transação. A
+  edição e a exclusão travam a mesma linha, então nunca trocam as questões
+  entre a leitura e a gravação das respostas.
 - **Cache por professor, invalidação global**: as chaves incluem o professor,
   mas uma nova tentativa ou qualquer escrita em prova limpa a tag `dashboard` inteira. É mais
   simples que uma tag por professor e barato neste volume (TTL de 5 min).

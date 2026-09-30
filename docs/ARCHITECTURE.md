@@ -146,13 +146,16 @@ ExamFormView --POST/PUT /exams--> EnsureProfile(teacher)
   -> DashboardService.flushCache()  (a prova e o título aparecem nas métricas)
   <- ExamResource (201 / 200)
 
-ExamListView --DELETE /exams/{id}--> ExamService.delete
-  -> apaga a prova (tentativas saem em CASCADE)
+ExamListView --DELETE /exams/{id}--> ExamService.delete  [DB::transaction]
+  -> trava a linha da prova (lockForUpdate)
+  -> prova já tem tentativas? --sim--> 409 ExamHasAttempts (histórico preservado;
+                                       a FK exam_attempts.exam_id é RESTRICT)
+  -> apaga a prova (questões e alternativas em CASCADE)
   -> DashboardService.flushCache()
   <- 204
 
-Front: "Editar" fica desabilitado quando attempts_count > 0; a tela de
-edição (GET /exams/{id} expõe attempts_count) avisa e bloqueia o "Salvar".
+Front: "Editar" e "Excluir" ficam desabilitados quando attempts_count > 0; a
+tela de edição (GET /exams/{id} expõe attempts_count) avisa e bloqueia o "Salvar".
 ```
 
 ### F2: Aluno responde a prova (fluxo central)
@@ -165,17 +168,19 @@ ExamTakeView
   v
 EnsureProfile(student) -> SubmitAttemptRequest (ids existem)
   v
-ExamAttemptService.submit
-  1. já existe tentativa?  --sim--> 409 ExamAlreadyAttempted
-  2. prova sem questões?   --------> 422
-  3. para cada questão:
+ExamAttemptService.submit   [tudo dentro de uma DB::transaction]
+  1. trava a linha da prova (lockForUpdate): serializa com edição/exclusão
+  2. já existe tentativa?  --sim--> 409 ExamAlreadyAttempted
+  3. lê as questões JÁ com a trava (as que valem na gravação)
+  4. prova sem questões?   --------> 422
+  5. para cada questão:
        resposta ausente?               -> 422
        alternativa de outra questão?   -> 422
        is_correct? score++
-  4. percentage = round(score / total * 100, 2)
-  5. DB::transaction: trava a linha da prova + exam_attempt + attempt_answers
+  6. percentage = round(score / total * 100, 2)
+  7. grava exam_attempt + attempt_answers
      violação do UNIQUE (envio concorrente) --> 409 ExamAlreadyAttempted
-  6. DashboardService.flushCache()   (Redis tag "dashboard")
+  8. DashboardService.flushCache()   (Redis tag "dashboard")
   v
 201 AttemptResultResource (score, %, gabarito por questão)
   -> router.push(ResultView)
@@ -195,17 +200,19 @@ DashboardService.remember("dashboard:<teacher>:<key>", TTL 300s, tag "dashboard"
    HIT  -> Redis
    MISS -> DashboardRepository (tudo restrito às provas do professor:
                                 exam_id IN (SELECT id FROM exams WHERE teacher_id = ?))
-             averagePercentage / totalAttempts
+             averagePercentage (por tentativa) / totalAttempts
+             examsAveragePercentage = AVG das médias de cada prova (peso igual)
              best  = ORDER BY percentage DESC, score DESC, submitted_at ASC
              worst = ORDER BY percentage ASC ...
              ranking = mesma ordenação canônica, paginada, filtro opcional por prova
              examMetrics = exams + COUNT/AVG/MAX/MIN das tentativas (null sem tentativas)
-             studentAverages = GROUP BY aluno: COUNT, AVG; ordem: média desc, nome
-           -> converte para DTO (array serializável; diferença = média do aluno
-              - média geral) -> Redis
+             studentAverages = tentativas JOIN (média de cada prova), GROUP BY aluno:
+                               COUNT, AVG(%), AVG(% - média da prova);
+                               ordem: desvio desc, média desc, nome
+           -> converte para DTO (array serializável) -> Redis
 Invalidação: ExamAttemptService.submit (nova tentativa),
              ExamService.create/update (provas e títulos listados nas métricas) e
-             ExamService.delete (tentativas removidas em cascata)
+             ExamService.delete (prova sem tentativas sai das métricas por prova)
 ```
 
 ### F4: Identidade (sem login)
@@ -227,7 +234,7 @@ Posse do recurso: AttemptController verifica attempt.student_id == aluno (403);
 | Exatamente 1 alternativa correta | `ExamRequest::withValidator` (apenas na aplicação, sem constraint no banco) |
 | Aluno vê e realiza provas | `StudentExamController` + `Student*Resource` sem gabarito |
 | Uma tentativa por prova | Service (`existsForStudentAndExam`, retorna 409) + `UNIQUE(exam_id, student_id)` (violação concorrente também vira 409) |
-| Prova armazenada | Postgres (exams/questions/options, tentativas e respostas); prova respondida não pode ser editada (409) |
+| Prova armazenada | Postgres (exams/questions/options, tentativas e respostas); prova respondida não pode ser editada nem excluída (409 + FK restritiva) |
 | Correção automática | `ExamAttemptService::submit`, no servidor |
 | Pontuação e percentual | `exam_attempts.score/percentage` + `ResultView` |
 | Dashboard: média, Top 1, ranking paginado | `DashboardService` / `DashboardRepository` / `DashboardView` |
@@ -260,5 +267,15 @@ em `openspec/specs/exam-management` e `openspec/specs/exam-attempts`):
 | Baixa | Envio duplo simultâneo recebia 500 (`QueryException` do índice único) em vez de 409. | `ExamAttemptService::submit` converte `UniqueConstraintViolationException` em `ExamAlreadyAttemptedException` (409). |
 | Baixa | `Cache::tags` dependia do driver: o padrão em `config/cache.php` era `database` (sem tags). | O padrão passou a ser `redis`. |
 
-Limitação aceita: uma prova já respondida não pode ser corrigida; a saída é
-excluir e recriar a prova.
+Um segundo code review levou à change `apply-second-code-review`:
+
+| Severidade | Ponto | Correção |
+|---|---|---|
+| Alta | "Aluno × média" comparava a média do aluno com a média geral, misturando provas de dificuldades diferentes. | `difference_from_exam_average`: média de *percentual − média da prova*, calculada no banco. |
+| Alta | Excluir prova respondida apagava o histórico de tentativas em cascata. | `ExamService::delete` responde **409**; FK `exam_attempts.exam_id` passou a `RESTRICT`. |
+| Média | A correção lia as questões antes da trava da prova: uma edição concorrente causava violação de FK (500). | Trava, verificação, leitura e correção dentro da mesma transação. |
+| Média | Faltava a "média das provas" pedida no enunciado. | `exams_average_percentage` no resumo, ao lado da média por tentativa. |
+| Baixa | O seed não criava tentativas; o dashboard abria vazio. | Seed com 8 tentativas, pela mesma correção da API. |
+
+Limitação aceita: uma prova já respondida não pode ser corrigida nem excluída;
+a saída é criar uma nova versão.
