@@ -182,6 +182,24 @@ que injeta os headers de perfil). Telas de professor (provas + dashboard com
 resumo, média por prova, aluno × média e ranking com filtro de prova) e aluno
 (responder + resultado).
 
+Interface com sistema visual próprio, sem biblioteca de UI:
+
+- **Design tokens** em `src/style.css` (cores semânticas, tipografia, espaçamento,
+  raios, sombras). As views só usam tokens `--color-*`, nunca cores fixas.
+- **Tema claro/escuro**: segue o sistema por padrão, com alternância
+  Claro/Escuro/Sistema (`ThemeToggle` + `composables/useTheme.js`), lembrada no
+  navegador e aplicada antes da primeira pintura por um script no `index.html`.
+- **Componentes base** em `src/components/ui/` (botão, card, badge, ícones SVG,
+  cabeçalho de página, estado vazio, estado de erro com "Tentar novamente",
+  skeleton, paginação, barra de progresso e anel de pontuação).
+- **Feedback**: `useConfirm()` abre um diálogo modal acessível (`<dialog>`) no
+  lugar de `window.confirm`; `useToast()` mostra notificações de sucesso/erro
+  (inclusive a mensagem da API em 403/409) no lugar de `window.alert`.
+- **Aluno**: progresso "X de N respondidas", alternativas com letra, confirmação
+  antes do envio e resultado com anel de percentual.
+- Acessibilidade (contraste AA nos dois temas, foco visível, `lang="pt-BR"`,
+  `prefers-reduced-motion`) e layout responsivo a partir de 360 px.
+
 ---
 
 ## Modelagem

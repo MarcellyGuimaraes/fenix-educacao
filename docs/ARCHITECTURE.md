@@ -103,7 +103,23 @@ porta 5173) com `./frontend` montado.
         student/ExamListView .... GET /student/exams
         student/ExamTakeView .... GET /student/exams/{id}, POST .../attempts
         student/ResultView ...... GET /student/attempts/{id}
+   +-- style.css         design tokens (claro/escuro via data-theme) + estilos base
+   +-- composables/
+        useTheme ......... Claro/Escuro/Sistema, localStorage("fenix_theme")
+        useToast ......... notificações (singleton; sobrevive a router.push)
+        useConfirm ....... confirm(opts) -> Promise<boolean>
+   +-- components/
+        ToastHost, ConfirmDialog ... montados uma vez em App.vue
+        ui/ ...................... AppButton, AppCard, AppBadge, AppIcon, PageHeader,
+                                   EmptyState, ErrorState, SkeletonBlock, AppPagination,
+                                   ProgressBar, ScoreRing, ThemeToggle
 ```
+
+O tema escolhido é aplicado por um script inline no `index.html` antes do
+bundle carregar (sem piscar o tema errado); em "Sistema" não há atributo e o
+CSS segue `prefers-color-scheme`. As views não usam `window.confirm`/`alert`:
+ações destrutivas e o envio da prova passam por `useConfirm`, e o resultado
+das ações (incluindo mensagens 403/409 da API) aparece via `useToast`.
 
 ## 3. Modelo de dados
 
