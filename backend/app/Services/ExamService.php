@@ -63,7 +63,7 @@ class ExamService
             Exam::query()->whereKey($exam->id)->lockForUpdate()->first();
 
             if ($exam->attempts()->exists()) {
-                throw new ExamHasAttemptsException;
+                throw ExamHasAttemptsException::forUpdate();
             }
 
             return $this->exams->update($exam, $data);
@@ -75,11 +75,27 @@ class ExamService
         return $exam;
     }
 
+    /**
+     * Exclui uma prova sem tentativas. Provas já respondidas não podem ser
+     * excluídas, pela mesma razão da edição: o histórico de tentativas precisa
+     * ser preservado (o banco também impede, via FK restritiva).
+     *
+     * @throws ExamHasAttemptsException
+     */
     public function delete(Exam $exam): void
     {
-        $this->exams->delete($exam);
+        DB::transaction(function () use ($exam): void {
+            // Mesma trava da edição e da submissão (ver ExamAttemptService::submit).
+            Exam::query()->whereKey($exam->id)->lockForUpdate()->first();
 
-        // As tentativas da prova saem em cascata → invalida o cache do dashboard.
+            if ($exam->attempts()->exists()) {
+                throw ExamHasAttemptsException::forDelete();
+            }
+
+            $this->exams->delete($exam);
+        });
+
+        // A prova sai das métricas por prova → invalida o cache do dashboard.
         $this->dashboard->flushCache();
     }
 }

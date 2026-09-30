@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Exceptions\ExamAlreadyAttemptedException;
 use App\Models\Exam;
 use App\Models\ExamAttempt;
+use App\Models\Question;
 use App\Models\Student;
 use App\Repositories\Contracts\ExamAttemptRepositoryInterface;
 use App\Repositories\Contracts\ExamRepositoryInterface;
@@ -49,13 +50,49 @@ class ExamAttemptService
      */
     public function submit(Exam $exam, Student $student, array $answers): ExamAttempt
     {
-        if ($this->attempts->existsForStudentAndExam($student->id, $exam->id)) {
+        try {
+            $attempt = DB::transaction(function () use ($exam, $student, $answers): ExamAttempt {
+                // Trava a linha da prova antes de ler as questões: serializa com
+                // uma edição ou exclusão concorrente (ver ExamService), que
+                // trocaria as questões entre a leitura e a gravação.
+                Exam::query()->whereKey($exam->id)->lockForUpdate()->first();
+
+                if ($this->attempts->existsForStudentAndExam($student->id, $exam->id)) {
+                    throw new ExamAlreadyAttemptedException;
+                }
+
+                // Lidas já com a trava: são as questões que valem na gravação.
+                $questions = $exam->load('questions.options')->questions;
+                [$score, $rows] = $this->grade($questions, $answers);
+
+                $total = $questions->count();
+                $percentage = round(($score / $total) * 100, 2);
+
+                return $this->attempts->createWithAnswers($exam, $student, $score, $total, $percentage, $rows);
+            });
+        } catch (UniqueConstraintViolationException) {
+            // Envio concorrente passou pela verificação acima; o índice único
+            // (exam_id, student_id) é a garantia final → mesmo 409 do caso comum.
             throw new ExamAlreadyAttemptedException;
         }
 
-        $exam->load('questions.options');
-        $questions = $exam->questions;
+        // Uma nova tentativa muda as métricas → invalida o cache do dashboard.
+        $this->dashboard->flushCache();
 
+        return $this->attempts->loadResult($attempt);
+    }
+
+    /**
+     * Correção automática: confere cada questão contra a resposta do aluno.
+     *
+     * @param  Collection<int, Question>  $questions
+     * @param  array<int, array{question_id: int, option_id: int}>  $answers
+     * @return array{int, array<int, array{question_id: int, option_id: int, is_correct: bool}>}
+     *
+     * @throws ValidationException
+     */
+    private function grade(Collection $questions, array $answers): array
+    {
         if ($questions->isEmpty()) {
             throw ValidationException::withMessages([
                 'exam' => 'Esta prova não possui questões e não pode ser respondida.',
@@ -95,27 +132,7 @@ class ExamAttemptService
             ];
         }
 
-        $total = $questions->count();
-        $percentage = round(($score / $total) * 100, 2);
-
-        try {
-            $attempt = DB::transaction(function () use ($exam, $student, $score, $total, $percentage, $rows): ExamAttempt {
-                // Trava a linha da prova: serializa com uma edição concorrente
-                // (ver ExamService::update), que apagaria as questões.
-                Exam::query()->whereKey($exam->id)->lockForUpdate()->first();
-
-                return $this->attempts->createWithAnswers($exam, $student, $score, $total, $percentage, $rows);
-            });
-        } catch (UniqueConstraintViolationException) {
-            // Envio concorrente passou pela verificação acima; o índice único
-            // (exam_id, student_id) é a garantia final → mesmo 409 do caso comum.
-            throw new ExamAlreadyAttemptedException;
-        }
-
-        // Uma nova tentativa muda as métricas → invalida o cache do dashboard.
-        $this->dashboard->flushCache();
-
-        return $this->attempts->loadResult($attempt);
+        return [$score, $rows];
     }
 
     /**

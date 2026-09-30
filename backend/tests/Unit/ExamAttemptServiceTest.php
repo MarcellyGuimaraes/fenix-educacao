@@ -9,8 +9,11 @@ use App\Models\Teacher;
 use App\Repositories\Contracts\ExamAttemptRepositoryInterface;
 use App\Services\DashboardService;
 use App\Services\ExamAttemptService;
+use App\Services\ExamService;
+use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 use Mockery\MockInterface;
 use Tests\TestCase;
@@ -126,5 +129,47 @@ class ExamAttemptServiceTest extends TestCase
 
         $this->expectException(ValidationException::class);
         $this->service->submit($exam, $student, $answers);
+    }
+
+    public function test_corrige_contra_as_questoes_lidas_dentro_da_transacao(): void
+    {
+        $exam = $this->makeExam(2);
+        $student = Student::factory()->create();
+        $answers = $this->answers($exam, [true, true]);
+
+        // Simula uma edição concorrente que termina logo antes de a submissão
+        // conseguir a trava: ao ver a consulta de trava da prova, o professor
+        // substitui as questões. Se a correção tivesse usado questões lidas
+        // antes da trava, a gravação apontaria para questões apagadas (FK → 500).
+        $edited = false;
+        DB::listen(function (QueryExecuted $query) use (&$edited, $exam): void {
+            if ($edited || ! str_contains($query->sql, 'from "exams"')) {
+                return;
+            }
+            $edited = true;
+
+            app(ExamService::class)->update(Exam::findOrFail($exam->id), [
+                'title' => 'Nova versão',
+                'questions' => [[
+                    'statement' => 'Questão nova',
+                    'options' => [
+                        ['text' => 'Certa', 'is_correct' => true],
+                        ['text' => 'Errada', 'is_correct' => false],
+                    ],
+                ]],
+            ]);
+        });
+
+        // A submissão relê as questões depois da trava: responde com erro de
+        // validação (422), e não com violação de FK (500), sem gravar nada.
+        try {
+            $this->service->submit($exam, $student, $answers);
+            $this->fail('Era esperada uma ValidationException.');
+        } catch (ValidationException $e) {
+            $this->assertArrayHasKey('answers', $e->errors());
+        }
+
+        $this->assertTrue($edited);
+        $this->assertDatabaseCount('exam_attempts', 0);
     }
 }

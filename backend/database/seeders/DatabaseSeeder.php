@@ -6,6 +6,7 @@ use App\Models\Exam;
 use App\Models\Question;
 use App\Models\Student;
 use App\Models\Teacher;
+use App\Services\ExamAttemptService;
 use Illuminate\Database\Seeder;
 
 class DatabaseSeeder extends Seeder
@@ -96,6 +97,52 @@ class DatabaseSeeder extends Seeder
                 ],
             ],
         ]);
+
+        // Tentativas de exemplo, para o dashboard não abrir vazio. A prova de
+        // Conhecimentos Gerais é a "difícil" (média menor): a Maria só fez essa
+        // e foi a melhor nela, então aparece acima da média no Aluno × média
+        // mesmo sem ter a maior média absoluta.
+        $this->createAttempts('Prova de Conhecimentos Gerais', [
+            'João Silva' => [true, false, false],
+            'Maria Oliveira' => [true, true, false],
+            'Pedro Santos' => [false, false, true],
+        ]);
+        $this->createAttempts('Prova de Lógica de Programação', [
+            'João Silva' => [true, true],
+            'Lucas Rocha' => [true, true],
+            'Carla Lima' => [true, false],
+        ]);
+        $this->createAttempts('Prova de História do Brasil', [
+            'João Silva' => [true, true],
+            'Carla Lima' => [true, false],
+        ]);
+    }
+
+    /**
+     * Registra tentativas pela mesma correção usada na API. Alunos que já
+     * fizeram a prova são ignorados, para o seeder poder rodar várias vezes.
+     *
+     * @param  array<string, array<int, bool>>  $answersByStudent  nome do aluno => acertar cada questão?
+     */
+    private function createAttempts(string $examTitle, array $answersByStudent): void
+    {
+        $exam = Exam::where('title', $examTitle)->with('questions.options')->firstOrFail();
+        $attempts = app(ExamAttemptService::class);
+
+        foreach ($answersByStudent as $studentName => $correctMap) {
+            $student = Student::where('name', $studentName)->firstOrFail();
+
+            if ($exam->attempts()->where('student_id', $student->id)->exists()) {
+                continue;
+            }
+
+            $answers = $exam->questions->values()->map(fn (Question $question, int $index): array => [
+                'question_id' => $question->id,
+                'option_id' => $question->options->firstWhere('is_correct', $correctMap[$index])->id,
+            ])->all();
+
+            $attempts->submit($exam, $student, $answers);
+        }
     }
 
     /**

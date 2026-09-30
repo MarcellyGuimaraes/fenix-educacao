@@ -127,7 +127,7 @@ class ExamController extends Controller
     #[OA\Delete(
         path: '/exams/{exam}',
         tags: ['Provas (Professor)'],
-        summary: 'Exclui uma prova',
+        summary: 'Exclui uma prova; bloqueado se já houver tentativas (o histórico é preservado)',
         parameters: [
             new OA\Parameter(ref: '#/components/parameters/RoleHeader'),
             new OA\Parameter(ref: '#/components/parameters/UserIdHeader'),
@@ -137,6 +137,9 @@ class ExamController extends Controller
             new OA\Response(response: 204, description: 'Excluída'),
             new OA\Response(response: 403, description: 'Prova de outro professor', content: new OA\JsonContent(ref: '#/components/schemas/Message')),
             new OA\Response(response: 404, description: 'Prova não encontrada'),
+            new OA\Response(response: 409, description: 'Prova já respondida não pode ser excluída', content: new OA\JsonContent(properties: [
+                new OA\Property(property: 'message', type: 'string', example: 'Esta prova já foi respondida e não pode ser excluída.'),
+            ])),
         ]
     )]
     public function destroy(Exam $exam): Response

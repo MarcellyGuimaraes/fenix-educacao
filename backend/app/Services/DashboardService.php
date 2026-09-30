@@ -24,7 +24,8 @@ class DashboardService
     ) {}
 
     /**
-     * Métricas gerais: média, melhor (Top 1), pior e total de tentativas.
+     * Métricas gerais: média das provas (cada prova com o mesmo peso), média
+     * por tentativa, melhor (Top 1), pior e total de tentativas.
      *
      * @return array<string, mixed>
      */
@@ -35,6 +36,7 @@ class DashboardService
             $worst = $this->dashboard->worstAttempt($teacher->id);
 
             return [
+                'exams_average_percentage' => $this->dashboard->examsAveragePercentage($teacher->id),
                 'average_percentage' => $this->dashboard->averagePercentage($teacher->id),
                 'total_attempts' => $this->dashboard->totalAttempts($teacher->id),
                 'best' => $best ? [
@@ -73,27 +75,26 @@ class DashboardService
     }
 
     /**
-     * Aluno × média: média de cada aluno nas provas do professor e a diferença
-     * (em pontos percentuais) em relação à média geral.
+     * Aluno × média: média de cada aluno nas provas do professor e o desvio
+     * médio (em pontos percentuais) em relação à média de cada prova que ele
+     * fez. Comparar prova a prova evita que um aluno que fez só a prova mais
+     * difícil apareça abaixo da média mesmo tendo ido melhor que a turma.
      *
      * @return array{data: array<int, array<string, mixed>>, meta: array<string, int>}
      */
     public function studentAverages(Teacher $teacher, int $perPage, int $page): array
     {
         return $this->remember($teacher, "students:{$perPage}:{$page}", function () use ($teacher, $perPage, $page): array {
-            $overall = $this->dashboard->averagePercentage($teacher->id);
             $paginator = $this->dashboard->studentAverages($teacher->id, $perPage, $page);
 
             $rows = [];
             foreach ($paginator->items() as $row) {
-                $average = (float) $this->percentage($row->average_percentage);
-
                 $rows[] = [
                     'student_id' => (int) $row->student_id,
                     'student_name' => $row->student_name,
                     'attempts_count' => (int) $row->attempts_count,
-                    'average_percentage' => $average,
-                    'difference_from_average' => round($average - $overall, 2),
+                    'average_percentage' => (float) $this->percentage($row->average_percentage),
+                    'difference_from_exam_average' => (float) $this->percentage($row->difference_from_exam_average),
                 ];
             }
 
@@ -148,7 +149,8 @@ class DashboardService
      */
     private function percentage(mixed $value): ?float
     {
-        return $value === null ? null : round((float) $value, 2);
+        // "+ 0.0" normaliza -0.0 (desvios que arredondam para zero) em 0.0.
+        return $value === null ? null : round((float) $value, 2) + 0.0;
     }
 
     /**

@@ -27,8 +27,11 @@ async function remove(exam) {
     await api.delete(`/exams/${exam.id}`)
     await load()
   } catch (e) {
-    // 403 (prova de outro professor): mostra o motivo retornado pela API.
-    alert(e.response?.status === 403 ? e.response.data.message : 'Não foi possível excluir a prova.')
+    // 403 (prova de outro professor) ou 409 (prova já respondida): mostra o
+    // motivo retornado pela API.
+    const status = e.response?.status
+    alert(status === 403 || status === 409 ? e.response.data.message : 'Não foi possível excluir a prova.')
+    if (status === 409) await load()
   }
 }
 
@@ -54,7 +57,7 @@ onMounted(load)
           <h3>{{ exam.title }}</h3>
           <p class="muted">
             {{ exam.questions_count }} questões · {{ exam.attempts_count }} tentativas
-            <template v-if="exam.attempts_count > 0"> · edição bloqueada (prova já respondida)</template>
+            <template v-if="exam.attempts_count > 0"> · edição e exclusão bloqueadas (prova já respondida)</template>
           </p>
         </div>
         <div class="spacer"></div>
@@ -66,7 +69,14 @@ onMounted(load)
         >
           Editar
         </button>
-        <button class="btn danger" @click="remove(exam)">Excluir</button>
+        <button
+          class="btn danger"
+          :disabled="exam.attempts_count > 0"
+          :title="exam.attempts_count > 0 ? 'Provas já respondidas não podem ser excluídas: o histórico de tentativas é preservado.' : null"
+          @click="remove(exam)"
+        >
+          Excluir
+        </button>
       </div>
     </div>
   </div>

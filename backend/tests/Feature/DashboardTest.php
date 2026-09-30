@@ -100,25 +100,30 @@ class DashboardTest extends TestCase
 
     public function test_excluir_prova_invalida_o_cache_do_dashboard(): void
     {
-        $this->attempt(100, 10);
-        $this->attempt(50, 5);
+        $unanswered = Exam::factory()->create(['teacher_id' => $this->teacher->id]);
 
-        // Primeiras leituras populam o cache.
-        $this->getJson('/api/dashboard/summary', $this->headers())
-            ->assertJsonPath('data.total_attempts', 2);
-        $this->getJson('/api/dashboard/ranking', $this->headers())
-            ->assertJsonPath('meta.total', 2);
+        // Primeira leitura popula o cache com as duas provas.
+        $this->getJson('/api/dashboard/exams', $this->headers())
+            ->assertJsonCount(2, 'data');
 
-        // Excluir a prova remove as tentativas em cascata e deve invalidar o cache.
-        $this->deleteJson("/api/exams/{$this->exam->id}", [], $this->headers())
+        // Só provas sem tentativas podem ser excluídas; a exclusão invalida o cache.
+        $this->deleteJson("/api/exams/{$unanswered->id}", [], $this->headers())
             ->assertNoContent();
 
+        $this->getJson('/api/dashboard/exams', $this->headers())
+            ->assertJsonCount(1, 'data')
+            ->assertJsonMissing(['exam_id' => $unanswered->id]);
+    }
+
+    public function test_prova_respondida_nao_sai_do_dashboard_ao_tentar_excluir(): void
+    {
+        $this->attempt(100, 10);
+
+        $this->deleteJson("/api/exams/{$this->exam->id}", [], $this->headers())
+            ->assertStatus(409);
+
         $this->getJson('/api/dashboard/summary', $this->headers())
-            ->assertJsonPath('data.total_attempts', 0)
-            ->assertJsonPath('data.best', null);
-        $this->getJson('/api/dashboard/ranking', $this->headers())
-            ->assertJsonPath('meta.total', 0)
-            ->assertJsonCount(0, 'data');
+            ->assertJsonPath('data.total_attempts', 1);
     }
 
     /**
@@ -188,6 +193,7 @@ class DashboardTest extends TestCase
         $this->getJson('/api/dashboard/summary', $this->headers())
             ->assertJsonPath('data.total_attempts', 0)
             ->assertJsonPath('data.average_percentage', 0)
+            ->assertJsonPath('data.exams_average_percentage', 0)
             ->assertJsonPath('data.best', null)
             ->assertJsonPath('data.worst', null);
 
@@ -257,16 +263,62 @@ class DashboardTest extends TestCase
             ->assertJsonCount(2, 'data')
             ->assertJsonPath('meta.total', 2);
 
+        // Prova 1: Ana 100 e Bruno 30 (média 65). Prova 2: Ana 80 (média 80).
+        // Ana: média de +35 e 0 = 17,5. Bruno: -35.
         $response->assertJsonPath('data.0.student_id', $ana->id)
             ->assertJsonPath('data.0.student_name', 'Ana')
-            ->assertJsonPath('data.0.attempts_count', 2);
+            ->assertJsonPath('data.0.attempts_count', 2)
+            ->assertJsonMissingPath('data.0.difference_from_average');
         $this->assertEquals(90, $response->json('data.0.average_percentage'));
-        $this->assertEquals(20, $response->json('data.0.difference_from_average'));
+        $this->assertEquals(17.5, $response->json('data.0.difference_from_exam_average'));
 
         $response->assertJsonPath('data.1.student_name', 'Bruno')
             ->assertJsonPath('data.1.attempts_count', 1);
         $this->assertEquals(30, $response->json('data.1.average_percentage'));
-        $this->assertEquals(-40, $response->json('data.1.difference_from_average'));
+        $this->assertEquals(-35, $response->json('data.1.difference_from_exam_average'));
+    }
+
+    public function test_melhor_aluno_da_prova_dificil_nao_aparece_abaixo_da_media(): void
+    {
+        $carla = Student::factory()->create(['name' => 'Carla']);
+        $davi = Student::factory()->create(['name' => 'Davi']);
+        $eva = Student::factory()->create(['name' => 'Eva']);
+        $easy = Exam::factory()->create(['teacher_id' => $this->teacher->id]);
+
+        // Prova difícil: média 40. Prova fácil: média 100.
+        $this->attemptOn($this->exam, 60, $carla);
+        $this->attemptOn($this->exam, 20, $davi);
+        $this->attemptOn($easy, 100, $davi);
+        $this->attemptOn($easy, 100, $eva);
+
+        $rows = collect($this->getJson('/api/dashboard/students', $this->headers())->json('data'))
+            ->keyBy('student_name');
+
+        // A média da Carla (60) é menor que a média por tentativa (70), mas ela
+        // foi a melhor da prova que fez: o desvio prova a prova é positivo.
+        $this->assertEquals(60, $rows['Carla']['average_percentage']);
+        $this->assertEquals(20, $rows['Carla']['difference_from_exam_average']);
+        $this->assertEquals(-10, $rows['Davi']['difference_from_exam_average']);
+        $this->assertEquals(0, $rows['Eva']['difference_from_exam_average']);
+
+        $this->assertSame(['Carla', 'Eva', 'Davi'], $rows->keys()->all());
+    }
+
+    public function test_resumo_traz_media_das_provas_e_media_por_tentativa(): void
+    {
+        $easy = Exam::factory()->create(['teacher_id' => $this->teacher->id]);
+        Exam::factory()->create(['teacher_id' => $this->teacher->id]); // sem tentativas
+
+        $this->attempt(40);
+        $this->attempt(40);
+        $this->attempt(40);
+        $this->attemptOn($easy, 90);
+
+        $response = $this->getJson('/api/dashboard/summary', $this->headers())->assertOk();
+
+        // Por tentativa: (40 + 40 + 40 + 90) / 4. Por prova: (40 + 90) / 2.
+        $this->assertEquals(52.5, $response->json('data.average_percentage'));
+        $this->assertEquals(65, $response->json('data.exams_average_percentage'));
     }
 
     public function test_aluno_versus_media_empate_ordena_por_nome_e_pagina(): void

@@ -79,8 +79,11 @@ onMounted(load)
     <template v-else-if="summary">
       <div class="metrics">
         <div class="card metric">
-          <span class="label">Média geral</span>
-          <span class="value">{{ summary.average_percentage }}%</span>
+          <span class="label" title="Média das médias de cada prova: cada prova tem o mesmo peso">Média das provas</span>
+          <span class="value">{{ summary.exams_average_percentage }}%</span>
+          <span class="muted small" title="Cada tentativa tem o mesmo peso">
+            Por tentativa: {{ summary.average_percentage }}%
+          </span>
         </div>
         <div class="card metric">
           <span class="label">🏆 Melhor pontuação (Top 1)</span>
@@ -126,6 +129,9 @@ onMounted(load)
       </div>
 
       <h2 class="section-title">Aluno × média</h2>
+      <p class="muted small hint">
+        Cada tentativa é comparada com a média da própria prova, para que a dificuldade de cada prova não distorça a comparação.
+      </p>
       <div class="card table-wrap">
         <table>
           <thead>
@@ -133,7 +139,7 @@ onMounted(load)
               <th>Aluno</th>
               <th>Tentativas</th>
               <th>Média do aluno</th>
-              <th>Diferença para a média geral</th>
+              <th>Desvio em relação à média de cada prova</th>
             </tr>
           </thead>
           <tbody>
@@ -143,11 +149,11 @@ onMounted(load)
               <td><strong>{{ student.average_percentage }}%</strong></td>
               <td
                 :class="{
-                  positive: student.difference_from_average > 0,
-                  negative: student.difference_from_average < 0,
+                  positive: student.difference_from_exam_average > 0,
+                  negative: student.difference_from_exam_average < 0,
                 }"
               >
-                {{ formatDifference(student.difference_from_average) }}
+                {{ formatDifference(student.difference_from_exam_average) }}
               </td>
             </tr>
             <tr v-if="!students.length">
@@ -223,6 +229,7 @@ onMounted(load)
 .metric .small { font-size: 0.8rem; }
 .section-title { margin-top: 2rem; margin-bottom: 0.5rem; }
 .section-title h2 { margin: 0; }
+.hint { margin: -0.25rem 0 0.5rem; font-size: 0.85rem; }
 .filter-label { margin: 0; }
 .filter { width: auto; min-width: 14rem; }
 .table-wrap { overflow-x: auto; }
