@@ -11,6 +11,8 @@ const saving = ref(false)
 const loading = ref(false)
 const errors = ref({})
 const generalError = ref(null)
+// Provas já respondidas não podem ser editadas (a API responde 409).
+const locked = ref(false)
 
 const form = ref({
   title: '',
@@ -47,6 +49,7 @@ async function load() {
   try {
     const { data } = await api.get(`/exams/${props.id}`)
     const exam = data.data
+    locked.value = exam.attempts_count > 0
     form.value = {
       title: exam.title,
       description: exam.description || '',
@@ -77,6 +80,9 @@ async function submit() {
     if (e.response?.status === 422) {
       errors.value = e.response.data.errors || {}
       generalError.value = e.response.data.message || 'Corrija os campos destacados.'
+    } else if (e.response?.status === 409) {
+      locked.value = true
+      generalError.value = e.response.data.message || 'Esta prova já foi respondida e não pode ser editada.'
     } else {
       generalError.value = 'Erro ao salvar a prova.'
     }
@@ -92,6 +98,9 @@ onMounted(load)
   <div>
     <h1>{{ isEdit ? 'Editar prova' : 'Nova prova' }}</h1>
     <div v-if="generalError" class="alert error">{{ generalError }}</div>
+    <div v-else-if="locked" class="alert info">
+      Esta prova já foi respondida por alunos e não pode mais ser editada.
+    </div>
     <div v-if="loading" class="muted">Carregando…</div>
 
     <form v-else class="grid" @submit.prevent="submit">
@@ -141,7 +150,7 @@ onMounted(load)
         <button type="button" class="btn secondary" @click="addQuestion">+ Adicionar questão</button>
         <div class="spacer"></div>
         <button type="button" class="btn secondary" @click="router.push({ name: 'teacher.exams' })">Cancelar</button>
-        <button type="submit" class="btn" :disabled="saving">{{ saving ? 'Salvando…' : 'Salvar prova' }}</button>
+        <button type="submit" class="btn" :disabled="saving || locked">{{ saving ? 'Salvando…' : 'Salvar prova' }}</button>
       </div>
     </form>
   </div>

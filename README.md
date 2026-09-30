@@ -86,6 +86,9 @@ pelo seeder). Veja também a seção *Decisões técnicas* sobre segurança.
 
 Duas aplicações independentes conversando por API REST (JSON).
 
+> Mapa completo do sistema (componentes, modelo de dados, fluxos críticos e
+> rastreabilidade dos requisitos): [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
+
 ### Backend — camadas (evitando *fat controllers*)
 
 ```
@@ -147,15 +150,20 @@ Principais endpoints (detalhes e schemas no Swagger):
 | GET | `/api/student/attempts/{attempt}` | aluno |
 
 Respostas padronizadas e tratamento de erros: `422` (validação), `404` (não
-encontrado), `409` (tentativa duplicada), `403`/`401` (perfil).
+encontrado), `409` (tentativa duplicada ou edição de prova já respondida),
+`403`/`401` (perfil).
+
+> Uma prova que já tem tentativas **não pode ser editada** (`PUT` responde `409`):
+> recriar as questões apagaria as respostas dos alunos. Para corrigi-la, exclua e
+> recrie a prova.
 
 ---
 
 ## Cache (Redis)
 
 O dashboard (leitura pesada e agregações) é cacheado no Redis com **tags**. Ao
-registrar uma nova tentativa, o cache do dashboard é **invalidado**, então as
-métricas nunca ficam desatualizadas.
+registrar uma nova tentativa ou excluir uma prova, o cache do dashboard é
+**invalidado**, então as métricas nunca ficam desatualizadas.
 
 ---
 

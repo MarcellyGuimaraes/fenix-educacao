@@ -6,9 +6,13 @@ use App\Exceptions\ExamAlreadyAttemptedException;
 use App\Models\Exam;
 use App\Models\Student;
 use App\Models\Teacher;
+use App\Repositories\Contracts\ExamAttemptRepositoryInterface;
+use App\Services\DashboardService;
 use App\Services\ExamAttemptService;
+use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Validation\ValidationException;
+use Mockery\MockInterface;
 use Tests\TestCase;
 
 class ExamAttemptServiceTest extends TestCase
@@ -89,6 +93,27 @@ class ExamAttemptServiceTest extends TestCase
 
         $this->expectException(ExamAlreadyAttemptedException::class);
         $this->service->submit($exam, $student, $this->answers($exam, [true]));
+    }
+
+    public function test_envio_concorrente_que_viola_indice_unico_vira_tentativa_duplicada(): void
+    {
+        $exam = $this->makeExam(1);
+        $student = Student::factory()->create();
+
+        // Simula o envio concorrente: passou pela verificação prévia, mas o
+        // índice único (exam_id, student_id) rejeita a gravação.
+        $this->mock(ExamAttemptRepositoryInterface::class, function (MockInterface $mock): void {
+            $mock->shouldReceive('existsForStudentAndExam')->andReturnFalse();
+            $mock->shouldReceive('createWithAnswers')->andThrow(new UniqueConstraintViolationException(
+                'sqlite', 'insert into "exam_attempts" ...', [], new \Exception('UNIQUE constraint failed'),
+            ));
+        });
+        $this->mock(DashboardService::class, function (MockInterface $mock): void {
+            $mock->shouldNotReceive('flushCache');
+        });
+
+        $this->expectException(ExamAlreadyAttemptedException::class);
+        app(ExamAttemptService::class)->submit($exam, $student, $this->answers($exam, [true]));
     }
 
     public function test_lanca_validacao_quando_falta_questao(): void

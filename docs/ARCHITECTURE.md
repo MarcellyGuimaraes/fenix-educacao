@@ -1,0 +1,233 @@
+# Mapa do Sistema — Fênix Provas Online
+
+Documento de arquitetura: componentes, modelo de dados, fluxos críticos e
+rastreabilidade dos requisitos do desafio técnico.
+
+## 1. Visão geral (topologia Docker Compose)
+
+```
+                         +---------------------------+
+   Navegador  ---------> |  frontend  (Vue 3 + Vite) |  :5173
+                         |  SPA: Router/Pinia/Axios  |
+                         +-------------+-------------+
+                                       | HTTP/JSON
+                                       | headers X-User-Role / X-User-Id
+                                       v
+                         +---------------------------+
+                         |  nginx 1.27               |  :8080 -> :80
+                         +-------------+-------------+
+                                       | FastCGI :9000
+                                       v
+                         +---------------------------+
+                         |  app  (PHP 8.4 / Laravel) |
+                         |  php-fpm + entrypoint     |
+                         +------+-------------+------+
+                                |             |
+                     SQL (5432) |             | cache tags (6379)
+                                v             v
+                    +----------------+   +----------------+
+                    | postgres 16    |   | redis 7        |
+                    | fonte da       |   | cache do       |
+                    | verdade        |   | dashboard      |
+                    +----------------+   +----------------+
+                     vol: postgres_data   vol: redis_data
+
+   Rede: bridge "fenix".  Boot do app: composer install -> .env/APP_KEY
+   -> espera Postgres -> migrate --seed -> l5-swagger:generate -> php-fpm
+```
+
+## 2. Componentes principais
+
+### Backend: camadas
+
+```
+ Rota (routes/api.php)
+   |
+   v
+ Middleware EnsureProfile ("profile:teacher" | "profile:student")
+   |  resolve Teacher/Student -> $request->attributes
+   v
+ Controller (fino)  ---->  FormRequest (validação de entrada)
+   |
+   v
+ Service (regra de negócio, transações, invalidação de cache)
+   |
+   v
+ Repository (Interface -> implementação Eloquent, via RepositoryServiceProvider)
+   |
+   v
+ Model (Eloquent)  -->  PostgreSQL
+   ^
+   |
+ API Resource (serialização de saída; versão "Student" sem gabarito)
+```
+
+| Camada | Componentes | Responsabilidade |
+|---|---|---|
+| Middleware | `EnsureProfile` | Único ponto de identidade (perfil vem por header) |
+| Controllers | `ExamController`, `DashboardController`, `StudentExamController`, `AttemptController`, `ProfileController` | Orquestração HTTP |
+| Validação | `ExamRequest`, `SubmitAttemptRequest` | Formato e regra de "exatamente 1 correta" |
+| Services | `ExamService`, `ExamAttemptService`, `DashboardService` | CRUD de prova, correção automática, métricas e cache |
+| Repositories | `ExamRepository`, `ExamAttemptRepository`, `DashboardRepository` | Consultas e escrita |
+| Resources | `ExamResource` (com gabarito), `Student*Resource` (sem gabarito), `AttemptResultResource` | Contrato de saída |
+| Erros | `ExamAlreadyAttemptedException` (409) + `shouldRenderJsonWhen(api/*)` | Todo erro da API sai em JSON |
+| Docs | `App\OpenApi\ApiDoc` + l5-swagger | `/api/documentation` |
+
+### Frontend
+
+```
+ main.js
+   +-- router/index.js   guarda por meta.role (teacher|student)
+   +-- stores/session.js Pinia + localStorage("fenix_session")
+   +-- services/api.js   Axios + interceptor que injeta X-User-Role/X-User-Id
+   +-- views/
+        HomeView ................ escolhe o perfil (GET /teachers, /students)
+        teacher/ExamListView .... GET /exams, DELETE /exams/{id}
+        teacher/ExamFormView .... GET/POST/PUT /exams
+        teacher/DashboardView ... GET /dashboard/summary, /dashboard/ranking
+        student/ExamListView .... GET /student/exams
+        student/ExamTakeView .... GET /student/exams/{id}, POST .../attempts
+        student/ResultView ...... GET /student/attempts/{id}
+```
+
+## 3. Modelo de dados
+
+```
+ teachers 1---N exams 1---N questions 1---N options
+                  |              ^             ^  (is_correct: exatamente 1 por questão,
+                  |              |             |   garantido na aplicação)
+                  |              |             |
+                  1              |             |
+                  |              |             |
+                  N              |             |
+ students 1---N exam_attempts    |             |
+                 UNIQUE(exam_id, student_id)   |
+                 score, total_questions,       |
+                 percentage, submitted_at      |
+                  |                            |
+                  1---N attempt_answers -------+
+                        (question_id, option_id, is_correct)
+                        UNIQUE(exam_attempt_id, question_id)
+
+ Todas as FKs usam ON DELETE CASCADE.
+```
+
+## 4. Fluxos de dados críticos
+
+### F1: Professor cria/edita/exclui prova
+
+```
+ExamFormView --POST/PUT /exams--> EnsureProfile(teacher)
+  -> ExamRequest: title, questions[>=1], options[>=2], exatamente 1 is_correct
+                                                   (422 se a validação falhar)
+  -> ExamService.create/update  [DB::transaction]
+       update: trava a linha da prova (lockForUpdate)
+               prova já tem tentativas? --sim--> 409 ExamHasAttempts
+                                                 (nada é alterado)
+       -> ExamRepository
+            create: insere exam + syncQuestions (order = índice + 1)
+            update: atualiza exam, APAGA todas as questions e recria
+  <- ExamResource (201 / 200)
+
+ExamListView --DELETE /exams/{id}--> ExamService.delete
+  -> apaga a prova (tentativas saem em CASCADE)
+  -> DashboardService.flushCache()
+  <- 204
+
+Front: "Editar" fica desabilitado quando attempts_count > 0; a tela de
+edição (GET /exams/{id} expõe attempts_count) avisa e bloqueia o "Salvar".
+```
+
+### F2: Aluno responde a prova (fluxo central)
+
+```
+ExamTakeView
+  | GET /student/exams/{id}  -> StudentExamResource (SEM is_correct)
+  |
+  | POST /student/exams/{id}/attempts  {answers:[{question_id, option_id}]}
+  v
+EnsureProfile(student) -> SubmitAttemptRequest (ids existem)
+  v
+ExamAttemptService.submit
+  1. já existe tentativa?  --sim--> 409 ExamAlreadyAttempted
+  2. prova sem questões?   --------> 422
+  3. para cada questão:
+       resposta ausente?               -> 422
+       alternativa de outra questão?   -> 422
+       is_correct? score++
+  4. percentage = round(score / total * 100, 2)
+  5. DB::transaction: trava a linha da prova + exam_attempt + attempt_answers
+     violação do UNIQUE (envio concorrente) --> 409 ExamAlreadyAttempted
+  6. DashboardService.flushCache()   (Redis tag "dashboard")
+  v
+201 AttemptResultResource (score, %, gabarito por questão)
+  -> router.push(ResultView)
+```
+
+### F3: Dashboard com cache
+
+```
+DashboardView
+  | GET /dashboard/summary
+  | GET /dashboard/ranking?page&per_page (per_page limitado a 1..50)
+  v
+DashboardService.remember("dashboard:<key>", TTL 300s, tag "dashboard")
+   HIT  -> Redis
+   MISS -> DashboardRepository
+             averagePercentage / totalAttempts
+             best  = ORDER BY percentage DESC, score DESC, submitted_at ASC
+             worst = ORDER BY percentage ASC ...
+             ranking = mesma ordenação canônica, paginada
+           -> converte para DTO (array serializável) -> Redis
+Invalidação: ExamAttemptService.submit (nova tentativa) e
+             ExamService.delete (tentativas removidas em cascata)
+```
+
+### F4: Identidade (sem login)
+
+```
+HomeView -> escolhe perfil -> session.enter(role, id, name) -> localStorage
+Toda requisição: Axios adiciona os headers X-User-Role e X-User-Id
+EnsureProfile: role diferente -> 403; id inexistente -> 401
+Posse do recurso: AttemptController verifica attempt.student_id == aluno (403)
+```
+
+## 5. Rastreabilidade: requisito do teste e onde ele é garantido
+
+| Requisito | Onde é garantido |
+|---|---|
+| Professor cria provas com múltiplas alternativas | `ExamController` + `ExamRequest` (`options min:2`) |
+| Exatamente 1 alternativa correta | `ExamRequest::withValidator` (apenas na aplicação, sem constraint no banco) |
+| Aluno vê e realiza provas | `StudentExamController` + `Student*Resource` sem gabarito |
+| Uma tentativa por prova | Service (`existsForStudentAndExam`, retorna 409) + `UNIQUE(exam_id, student_id)` (violação concorrente também vira 409) |
+| Prova armazenada | Postgres (exams/questions/options, tentativas e respostas); prova respondida não pode ser editada (409) |
+| Correção automática | `ExamAttemptService::submit`, no servidor |
+| Pontuação e percentual | `exam_attempts.score/percentage` + `ResultView` |
+| Dashboard: média, Top 1, ranking paginado | `DashboardService` / `DashboardRepository` / `DashboardView` |
+| Redis para cache | Tag `dashboard`, TTL 300s, invalidação na submissão e na exclusão de prova |
+| Docker Compose | 5 serviços + entrypoint automatizado |
+| API REST organizada | `apiResource` + prefixo `/student` + Swagger |
+| Validação e tratamento de erros | FormRequests, 401/403/404/409/422 em JSON |
+| Front consome a API | Vue + Axios |
+| 2 acessos sem login | Headers + `EnsureProfile` (simplificação consciente, documentada no README) |
+
+**Decisões que existem por causa do enunciado (não são dívida técnica):**
+
+- O perfil vem por header e pode ser falsificado; não há autenticação real.
+- Qualquer professor pode editar qualquer prova (não há checagem de `teacher_id`).
+- O dashboard é global e não separa por professor.
+
+## 6. Pontos de atenção (resolvidos)
+
+Riscos encontrados na análise de arquitetura e corrigidos pela change OpenSpec
+`fix-exam-integrity-and-cache` (`openspec/changes/`):
+
+| Severidade | Ponto | Correção |
+|---|---|---|
+| Alta | Editar uma prova que já tem tentativas apagava em cascata as respostas dos alunos (`ExamRepository::update` recria as questões). | `ExamService::update` responde **409** (`ExamHasAttemptsException`) quando há tentativas e trava a linha da prova, serializando com a submissão. O front desabilita "Editar" e bloqueia o "Salvar". |
+| Média | `ExamService::delete` não invalidava o cache: o dashboard mostrava tentativas apagadas por até 5 min. | `delete` chama `DashboardService::flushCache()`. |
+| Baixa | Envio duplo simultâneo recebia 500 (`QueryException` do índice único) em vez de 409. | `ExamAttemptService::submit` converte `UniqueConstraintViolationException` em `ExamAlreadyAttemptedException` (409). |
+| Baixa | `Cache::tags` dependia do driver: o padrão em `config/cache.php` era `database` (sem tags). | O padrão passou a ser `redis`. |
+
+Limitação aceita: uma prova já respondida não pode ser corrigida; a saída é
+excluir e recriar a prova.

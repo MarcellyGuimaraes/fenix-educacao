@@ -95,7 +95,7 @@ class ExamController extends Controller
     #[OA\Put(
         path: '/exams/{exam}',
         tags: ['Provas (Professor)'],
-        summary: 'Atualiza uma prova (substitui as questões)',
+        summary: 'Atualiza uma prova (substitui as questões); bloqueado se já houver tentativas',
         parameters: [
             new OA\Parameter(ref: '#/components/parameters/RoleHeader'),
             new OA\Parameter(ref: '#/components/parameters/UserIdHeader'),
@@ -105,6 +105,9 @@ class ExamController extends Controller
         responses: [
             new OA\Response(response: 200, description: 'OK', content: new OA\JsonContent(properties: [
                 new OA\Property(property: 'data', ref: '#/components/schemas/Exam'),
+            ])),
+            new OA\Response(response: 409, description: 'Prova já respondida não pode ser editada', content: new OA\JsonContent(properties: [
+                new OA\Property(property: 'message', type: 'string', example: 'Esta prova já foi respondida e não pode ser editada.'),
             ])),
             new OA\Response(response: 422, description: 'Erro de validação', content: new OA\JsonContent(ref: '#/components/schemas/ValidationError')),
         ]
