@@ -6,22 +6,28 @@ rastreabilidade dos requisitos do desafio técnico.
 ## 1. Visão geral (topologia Docker Compose)
 
 ```
-                         +---------------------------+
-   Navegador  ---------> |  frontend  (Vue 3 + Vite) |  :5173
-                         |  SPA: Router/Pinia/Axios  |
-                         +-------------+-------------+
-                                       | HTTP/JSON
-                                       | headers X-User-Role / X-User-Id
-                                       v
-                         +---------------------------+
-                         |  nginx 1.27               |  :8080 -> :80
-                         +-------------+-------------+
+                         +------------------------------+
+   Navegador  ---------> |  frontend  (nginx 1.27)      |  :5173 -> :80
+        |                |  dist/ do `vite build`       |
+        |                |  SPA: Router/Pinia/Axios     |
+        |                |  fallback -> index.html      |
+        |                +------------------------------+
+        |
+        | HTTP/JSON (o JS da SPA chama a API direto)
+        | headers X-User-Role / X-User-Id
+        v
+                         +------------------------------+
+                         |  nginx 1.27 (imagem própria) |  :8080 -> :80
+                         |  backend/public/ copiado     |
+                         +-------------+----------------+
                                        | FastCGI :9000
                                        v
-                         +---------------------------+
-                         |  app  (PHP 8.4 / Laravel) |
-                         |  php-fpm + entrypoint     |
-                         +------+-------------+------+
+                         +------------------------------+
+                         |  app  (PHP 8.4 / Laravel)    |
+                         |  php-fpm + entrypoint        |
+                         |  código + vendor/ na imagem  |
+                         |  OPcache sem revalidação     |
+                         +------+-------------+---------+
                                 |             |
                      SQL (5432) |             | cache tags (6379)
                                 v             v
@@ -32,9 +38,17 @@ rastreabilidade dos requisitos do desafio técnico.
                     +----------------+   +----------------+
                      vol: postgres_data   vol: redis_data
 
-   Rede: bridge "fenix".  Boot do app: composer install -> .env/APP_KEY
-   -> espera Postgres -> migrate --seed -> l5-swagger:generate -> php-fpm
+   Rede: bridge "fenix". Modo padrão sem bind mounts: o código vai nas imagens
+   (composer install / vite build no build).
+   Boot do app: .env/APP_KEY -> espera Postgres -> migrate --seed
+   -> l5-swagger:generate -> optimize (config/rotas/eventos/views) -> php-fpm
 ```
+
+**Modo dev** (`docker-compose.dev.yml`, opcional): `app` monta `./backend` com o
+`vendor/` no volume `backend_vendor`, OPcache revalidando e `APP_OPTIMIZE=false`
+(o boot roda `optimize:clear` no lugar de `optimize`); `nginx` monta
+`./backend/public`; `frontend` usa o estágio `dev` (Vite dev server com HMR,
+porta 5173) com `./frontend` montado.
 
 ## 2. Componentes principais
 
@@ -205,7 +219,7 @@ Posse do recurso: AttemptController verifica attempt.student_id == aluno (403)
 | Pontuação e percentual | `exam_attempts.score/percentage` + `ResultView` |
 | Dashboard: média, Top 1, ranking paginado | `DashboardService` / `DashboardRepository` / `DashboardView` |
 | Redis para cache | Tag `dashboard`, TTL 300s, invalidação na submissão e na exclusão de prova |
-| Docker Compose | 5 serviços + entrypoint automatizado |
+| Docker Compose | 5 serviços + entrypoint automatizado; modo padrão otimizado e modo dev opcional |
 | API REST organizada | `apiResource` + prefixo `/student` + Swagger |
 | Validação e tratamento de erros | FormRequests, 401/403/404/409/422 em JSON |
 | Front consome a API | Vue + Axios |

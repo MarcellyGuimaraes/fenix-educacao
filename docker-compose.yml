@@ -35,6 +35,9 @@ services:
     networks:
       - fenix
 
+  # Modo padrão: o código vai dentro da imagem (sem bind mounts), com OPcache
+  # sem revalidação e config/rotas em cache. Para editar com reload, use o
+  # docker-compose.dev.yml (ver README).
   app:
     build:
       context: ./backend
@@ -55,41 +58,40 @@ services:
       REDIS_HOST: redis
       REDIS_PORT: 6379
       CACHE_STORE: redis
-      APP_ENV: local
-    volumes:
-      - ./backend:/var/www/html
+      APP_ENV: production
+      APP_DEBUG: "false"
+      LOG_LEVEL: warning
+      APP_OPTIMIZE: "true"
     expose:
       - "9000"
     networks:
       - fenix
 
   nginx:
-    image: nginx:1.27-alpine
+    build:
+      context: ./backend
+      dockerfile: docker/nginx/Dockerfile
     container_name: fenix_nginx
     depends_on:
       - app
     ports:
       - "${APP_PORT:-8080}:80"
-    volumes:
-      - ./backend:/var/www/html
-      - ./backend/docker/nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
     networks:
       - fenix
 
+  # Build estático do Vite servido por nginx. A URL da API é fixada no build.
   frontend:
     build:
       context: ./frontend
       dockerfile: Dockerfile
+      target: prod
+      args:
+        VITE_API_URL: ${VITE_API_URL:-http://localhost:8080/api}
     container_name: fenix_frontend
     depends_on:
       - nginx
-    environment:
-      VITE_API_URL: ${VITE_API_URL:-http://localhost:8080/api}
     ports:
-      - "${FRONTEND_PORT:-5173}:5173"
-    volumes:
-      - ./frontend:/app
-      - /app/node_modules
+      - "${FRONTEND_PORT:-5173}:80"
     networks:
       - fenix
 

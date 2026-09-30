@@ -31,13 +31,61 @@ Postgres ou Redis instalados.
 docker compose up --build
 ```
 
-Na subida, o container do backend automaticamente:
-1. instala as dependências (`composer install`);
-2. cria o `.env` e gera a `APP_KEY` (se faltarem);
-3. aguarda o PostgreSQL ficar pronto;
-4. roda as migrations e o seeder (`migrate --seed`);
-5. gera a documentação Swagger;
+Esse é o **modo padrão**, otimizado para avaliação: o código do backend e o
+`vendor/` vão dentro da imagem (sem bind mounts), o OPcache não revalida
+arquivos, a config/rotas/eventos ficam em cache, `APP_DEBUG=false` e o frontend
+é um build estático (`vite build`) servido por nginx.
+
+No build da imagem do backend roda o `composer install`. Na subida, o container
+automaticamente:
+1. cria o `.env` e gera a `APP_KEY` (se faltarem);
+2. aguarda o PostgreSQL ficar pronto;
+3. roda as migrations e o seeder (`migrate --seed`, idempotente);
+4. gera a documentação Swagger;
+5. faz o cache de config, rotas, eventos e views (`php artisan optimize`);
 6. sobe o `php-fpm`.
+
+> No modo padrão, alterações no código só entram com um novo
+> `docker compose up --build`.
+
+### Modo de desenvolvimento (opcional)
+
+Para editar com reload, suba com o override de desenvolvimento:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build
+```
+
+Nesse modo o código de `backend/` e `frontend/` é montado do host (alterações
+refletem sem rebuild), o `vendor/` fica num volume nomeado (`backend_vendor`), o
+OPcache revalida os arquivos, `APP_DEBUG=true`, sem cache de config, e o frontend
+roda no Vite dev server com HMR.
+
+> Se o `composer.lock` mudar, recrie o volume do `vendor/`:
+> `docker compose -f docker-compose.yml -f docker-compose.dev.yml down` e
+> `docker volume rm fenix-educacao_backend_vendor`.
+
+### URL da API no frontend
+
+No modo padrão, `VITE_API_URL` é um **argumento de build** do frontend (fica
+fixado no bundle). Para trocar, defina a variável no `.env` da raiz e refaça o
+build: `docker compose up --build frontend`.
+
+### Performance
+
+Medido no Docker Desktop para Windows, 10 chamadas aquecidas por endpoint
+(mediana, com `curl`):
+
+| Endpoint | Antes (bind mount) | Modo padrão | Modo dev |
+|---|---|---|---|
+| `GET /api/teachers` | ~4,7 s | ~41 ms | ~215 ms |
+| `GET /api/student/exams` | ~5,8 s | ~49 ms | ~304 ms |
+| `GET /api/dashboard/summary` | ~7,3 s | ~43 ms | ~234 ms |
+
+A lentidão anterior vinha do bind mount do código (inclusive `vendor/`) no
+Docker Desktop do Windows: cada leitura de arquivo cruzava a fronteira Windows ↔
+VM. No modo padrão o código fica na imagem; no modo dev só o `vendor/` sai do
+bind mount.
 
 ### Acessos
 
@@ -52,7 +100,7 @@ Na subida, o container do backend automaticamente:
 
 | Serviço | Host | Container |
 |---|---|---|
-| Frontend | 5173 | 5173 |
+| Frontend | 5173 | 80 (nginx; 5173 no modo dev) |
 | API (nginx) | 8080 | 80 |
 | PostgreSQL | **5434** | 5432 |
 | Redis | 6379 | 6379 |
@@ -170,14 +218,15 @@ registrar uma nova tentativa ou excluir uma prova, o cache do dashboard é
 ## Testes
 
 Suíte com **~94% de cobertura**, isolada em SQLite em memória + cache array
-(não toca o Postgres/Redis reais).
+(não toca o Postgres/Redis reais). Roda no container padrão mesmo com a config
+em cache: o `phpunit.xml` aponta os caches para arquivos que nunca são gerados.
 
 ```bash
 # rodar os testes
 docker compose exec app php artisan test
 
-# com relatório de cobertura
-docker compose exec app php artisan test --coverage
+# com relatório de cobertura (o PCOV fica desligado por padrão e é ligado só aqui)
+docker compose exec -e PHP_PCOV_ENABLED=1 app php artisan test --coverage
 ```
 
 Cobrem: CRUD de provas e validações, fluxo do aluno (responder, correção,
@@ -190,7 +239,8 @@ dashboard (métricas, ranking e invalidação de cache).
 
 ```bash
 # recriar o banco do zero com dados de exemplo
-docker compose exec app php artisan migrate:fresh --seed
+# (--force: o modo padrão roda com APP_ENV=production)
+docker compose exec app php artisan migrate:fresh --seed --force
 
 # limpar o cache
 docker compose exec app php artisan cache:clear
@@ -218,4 +268,3 @@ docker compose exec app php artisan cache:clear
 ## Próximos passos (fora do escopo atual)
 
 - Autenticação real com **Sanctum** (token verificado no servidor).
-- Performance no Docker/Windows: **OPcache** e `vendor/` em volume dedicado.

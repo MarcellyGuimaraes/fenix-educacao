@@ -1,0 +1,25 @@
+# Dependências são instaladas dentro da imagem
+vendor/
+node_modules/
+
+# Configuração e artefatos locais
+.env
+.env.*
+!.env.example
+.git
+.phpunit.cache
+.phpunit.result.cache
+public/hot
+public/storage
+
+# Caches e logs gerados em runtime (mantém os .gitignore que preservam as pastas)
+storage/logs/*
+!storage/logs/.gitignore
+storage/framework/cache/*
+!storage/framework/cache/.gitignore
+storage/framework/sessions/*
+!storage/framework/sessions/.gitignore
+storage/framework/views/*
+!storage/framework/views/.gitignore
+storage/api-docs
+bootstrap/cache/*.php

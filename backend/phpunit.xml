@@ -18,7 +18,17 @@
         </include>
     </source>
     <php>
+        <!-- O Laravel lê $_SERVER antes de $_ENV, e o <env> não sobrescreve $_SERVER.
+             Sem isto, o APP_ENV=production do container venceria e o `migrate`
+             do RefreshDatabase pediria confirmação (e não rodaria). -->
+        <server name="APP_ENV" value="testing" force="true"/>
         <env name="APP_ENV" value="testing" force="true"/>
+        <!-- O container padrão roda com `php artisan optimize`. Apontar os caches
+             para arquivos que nunca são gerados faz a suíte sempre carregar a
+             config fresca, com os <env> abaixo. -->
+        <env name="APP_CONFIG_CACHE" value="bootstrap/cache/config.testing.php" force="true"/>
+        <env name="APP_ROUTES_CACHE" value="bootstrap/cache/routes.testing.php" force="true"/>
+        <env name="APP_EVENTS_CACHE" value="bootstrap/cache/events.testing.php" force="true"/>
         <env name="APP_MAINTENANCE_DRIVER" value="file"/>
         <env name="BCRYPT_ROUNDS" value="4"/>
         <env name="BROADCAST_CONNECTION" value="null"/>
