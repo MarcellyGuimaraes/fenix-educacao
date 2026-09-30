@@ -220,7 +220,9 @@ Posse do recurso: AttemptController verifica attempt.student_id == aluno (403)
 ## 6. Pontos de atenção (resolvidos)
 
 Riscos encontrados na análise de arquitetura e corrigidos pela change OpenSpec
-`fix-exam-integrity-and-cache` (`openspec/changes/`):
+`fix-exam-integrity-and-cache` (arquivada em
+`openspec/changes/archive/2026-09-29-fix-exam-integrity-and-cache/`; requisitos
+em `openspec/specs/exam-management` e `openspec/specs/exam-attempts`):
 
 | Severidade | Ponto | Correção |
 |---|---|---|
