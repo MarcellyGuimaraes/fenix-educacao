@@ -237,8 +237,8 @@ encontrado), `409` (tentativa duplicada ou edição de prova já respondida),
 
 O dashboard (leitura pesada e agregações) é cacheado no Redis com **tags**, com
 chaves separadas por professor (o cache de um nunca é servido a outro). Ao
-registrar uma nova tentativa ou excluir uma prova, o cache do dashboard é
-**invalidado**, então as métricas nunca ficam desatualizadas.
+registrar uma nova tentativa ou criar, editar ou excluir uma prova, o cache do
+dashboard é **invalidado**, então as métricas nunca ficam desatualizadas.
 
 ---
 
@@ -299,7 +299,7 @@ docker compose exec app php artisan cache:clear
 - **Métricas agregadas no banco**: média por prova e aluno × média saem de
   `COUNT`/`AVG`/`MAX`/`MIN` em uma query cada, não de laços em PHP.
 - **Cache por professor, invalidação global**: as chaves incluem o professor,
-  mas uma nova tentativa ou exclusão limpa a tag `dashboard` inteira. É mais
+  mas uma nova tentativa ou qualquer escrita em prova limpa a tag `dashboard` inteira. É mais
   simples que uma tag por professor e barato neste volume (TTL de 5 min).
 - **DTO no cache do ranking**: cacheamos uma estrutura serializável (linhas +
   meta), nunca o objeto paginador do Laravel (que não sobrevive à
