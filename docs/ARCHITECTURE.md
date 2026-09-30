@@ -143,6 +143,7 @@ ExamFormView --POST/PUT /exams--> EnsureProfile(teacher)
        -> ExamRepository
             create: insere exam + syncQuestions (order = índice + 1)
             update: atualiza exam, APAGA todas as questions e recria
+  -> DashboardService.flushCache()  (a prova e o título aparecem nas métricas)
   <- ExamResource (201 / 200)
 
 ExamListView --DELETE /exams/{id}--> ExamService.delete
@@ -202,7 +203,8 @@ DashboardService.remember("dashboard:<teacher>:<key>", TTL 300s, tag "dashboard"
              studentAverages = GROUP BY aluno: COUNT, AVG; ordem: média desc, nome
            -> converte para DTO (array serializável; diferença = média do aluno
               - média geral) -> Redis
-Invalidação: ExamAttemptService.submit (nova tentativa) e
+Invalidação: ExamAttemptService.submit (nova tentativa),
+             ExamService.create/update (provas e títulos listados nas métricas) e
              ExamService.delete (tentativas removidas em cascata)
 ```
 
@@ -231,7 +233,7 @@ Posse do recurso: AttemptController verifica attempt.student_id == aluno (403);
 | Dashboard: média, Top 1, ranking paginado | `DashboardService` / `DashboardRepository` / `DashboardView` |
 | Dashboard: média por prova, aluno × média, ranking filtrável | `GET /dashboard/exams`, `/dashboard/students`, `/dashboard/ranking?exam_id` + tabelas e filtro no `DashboardView` |
 | Professor só gerencia e mede as próprias provas | `ExamRepository::forTeacherWithCounts`, `EnsureExamOwner` (403), dashboard restrito por `teacher_id` com cache por professor |
-| Redis para cache | Tag `dashboard`, TTL 300s, invalidação na submissão e na exclusão de prova |
+| Redis para cache | Tag `dashboard`, TTL 300s, invalidação na submissão e ao criar, editar ou excluir prova |
 | Docker Compose | 5 serviços + entrypoint automatizado; modo padrão otimizado e modo dev opcional |
 | API REST organizada | `apiResource` + prefixo `/student` + Swagger |
 | Validação e tratamento de erros | FormRequests, 401/403/404/409/422 em JSON; ids inválidos nunca geram 500 |

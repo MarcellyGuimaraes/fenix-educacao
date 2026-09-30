@@ -359,4 +359,47 @@ class DashboardTest extends TestCase
         $this->getJson('/api/dashboard/students', $this->headers())
             ->assertJsonPath('meta.total', 2);
     }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function examPayload(string $title): array
+    {
+        return [
+            'title' => $title,
+            'questions' => [[
+                'statement' => 'Q?',
+                'options' => [
+                    ['text' => 'Certa', 'is_correct' => true],
+                    ['text' => 'Errada', 'is_correct' => false],
+                ],
+            ]],
+        ];
+    }
+
+    public function test_criar_prova_invalida_o_cache_do_dashboard(): void
+    {
+        // Primeira leitura popula o cache com a prova do setUp.
+        $this->getJson('/api/dashboard/exams', $this->headers())
+            ->assertJsonCount(1, 'data');
+
+        $this->postJson('/api/exams', $this->examPayload('Prova nova'), $this->headers())
+            ->assertCreated();
+
+        $this->getJson('/api/dashboard/exams', $this->headers())
+            ->assertJsonCount(2, 'data')
+            ->assertJsonFragment(['exam_title' => 'Prova nova', 'attempts_count' => 0]);
+    }
+
+    public function test_editar_prova_invalida_o_cache_do_dashboard(): void
+    {
+        $this->getJson('/api/dashboard/exams', $this->headers())
+            ->assertJsonPath('data.0.exam_title', $this->exam->title);
+
+        $this->putJson("/api/exams/{$this->exam->id}", $this->examPayload('Título novo'), $this->headers())
+            ->assertOk();
+
+        $this->getJson('/api/dashboard/exams', $this->headers())
+            ->assertJsonPath('data.0.exam_title', 'Título novo');
+    }
 }

@@ -38,7 +38,12 @@ class ExamService
     {
         $data['teacher_id'] = $teacher->id;
 
-        return DB::transaction(fn (): Exam => $this->exams->create($data));
+        $exam = DB::transaction(fn (): Exam => $this->exams->create($data));
+
+        // O dashboard lista também provas sem tentativas → invalida o cache.
+        $this->dashboard->flushCache();
+
+        return $exam;
     }
 
     /**
@@ -52,7 +57,7 @@ class ExamService
      */
     public function update(Exam $exam, array $data): Exam
     {
-        return DB::transaction(function () use ($exam, $data): Exam {
+        $exam = DB::transaction(function () use ($exam, $data): Exam {
             // Trava a linha da prova: uma submissão concorrente espera o fim
             // desta transação (ver ExamAttemptService::submit).
             Exam::query()->whereKey($exam->id)->lockForUpdate()->first();
@@ -63,6 +68,11 @@ class ExamService
 
             return $this->exams->update($exam, $data);
         });
+
+        // O título aparece nas métricas e no ranking → invalida o cache.
+        $this->dashboard->flushCache();
+
+        return $exam;
     }
 
     public function delete(Exam $exam): void
