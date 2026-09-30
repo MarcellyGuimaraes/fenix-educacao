@@ -1,10 +1,31 @@
 <!doctype html>
-<html lang="en">
+<html lang="pt-BR">
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="Fênix Provas: crie provas, responda online e acompanhe o desempenho da turma." />
+    <meta name="theme-color" content="#f6f7f9" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#0b1017" media="(prefers-color-scheme: dark)" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap"
+    />
     <title>Fênix Provas</title>
+    <script>
+      // Aplica o tema salvo antes da primeira pintura (evita piscar o tema errado).
+      // Sem escolha salva ("Sistema"), o CSS segue prefers-color-scheme.
+      try {
+        var theme = localStorage.getItem('fenix_theme')
+        if (theme === 'light' || theme === 'dark') {
+          document.documentElement.setAttribute('data-theme', theme)
+        }
+      } catch (e) {
+        /* armazenamento indisponível: segue o sistema */
+      }
+    </script>
   </head>
   <body>
     <div id="app"></div>
