@@ -188,10 +188,12 @@ Principais endpoints (detalhes e schemas no Swagger):
 | Método | Rota | Perfil |
 |---|---|---|
 | GET | `/api/teachers`, `/api/students` | público |
-| GET/POST | `/api/exams` | professor |
-| GET/PUT/DELETE | `/api/exams/{exam}` | professor |
+| GET/POST | `/api/exams` (lista só as provas do professor) | professor |
+| GET/PUT/DELETE | `/api/exams/{exam}` (só o autor da prova) | professor |
 | GET | `/api/dashboard/summary` | professor |
-| GET | `/api/dashboard/ranking?page&per_page` | professor |
+| GET | `/api/dashboard/exams` (média, melhor, pior e total por prova) | professor |
+| GET | `/api/dashboard/students?page&per_page` (aluno × média) | professor |
+| GET | `/api/dashboard/ranking?exam_id&page&per_page` | professor |
 | GET | `/api/student/exams` | aluno |
 | GET | `/api/student/exams/{exam}` | aluno |
 | POST | `/api/student/exams/{exam}/attempts` | aluno |
@@ -201,6 +203,15 @@ Respostas padronizadas e tratamento de erros: `422` (validação), `404` (não
 encontrado), `409` (tentativa duplicada ou edição de prova já respondida),
 `403`/`401` (perfil).
 
+> **Cada professor enxerga apenas o que é seu.** A listagem de provas e todas as
+> métricas do dashboard consideram só as provas do professor identificado no
+> header. Visualizar, editar ou excluir a prova de outro professor responde
+> `403` (antes de qualquer validação), assim como filtrar o ranking por ela.
+>
+> **Ids inválidos nunca geram `500`.** Um `X-User-Id` que não seja um inteiro
+> positivo responde `401`; um `{exam}`/`{attempt}` inválido na URL (letras, zero,
+> número grande demais) responde `404`. O valor nem chega ao banco.
+
 > Uma prova que já tem tentativas **não pode ser editada** (`PUT` responde `409`):
 > recriar as questões apagaria as respostas dos alunos. Para corrigi-la, exclua e
 > recrie a prova.
@@ -209,7 +220,8 @@ encontrado), `409` (tentativa duplicada ou edição de prova já respondida),
 
 ## Cache (Redis)
 
-O dashboard (leitura pesada e agregações) é cacheado no Redis com **tags**. Ao
+O dashboard (leitura pesada e agregações) é cacheado no Redis com **tags**, com
+chaves separadas por professor (o cache de um nunca é servido a outro). Ao
 registrar uma nova tentativa ou excluir uma prova, o cache do dashboard é
 **invalidado**, então as métricas nunca ficam desatualizadas.
 
@@ -230,8 +242,10 @@ docker compose exec -e PHP_PCOV_ENABLED=1 app php artisan test --coverage
 ```
 
 Cobrem: CRUD de provas e validações, fluxo do aluno (responder, correção,
-tentativa única, resultado), autorização por perfil e por dono do recurso, e o
-dashboard (métricas, ranking e invalidação de cache).
+tentativa única, resultado), autorização por perfil e por dono do recurso
+(inclusive dono da prova), ids inválidos (401/404, nunca 500) e o dashboard
+(métricas gerais e por prova, aluno × média, ranking com filtro, isolamento
+entre professores e invalidação de cache).
 
 ---
 

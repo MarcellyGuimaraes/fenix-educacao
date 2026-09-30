@@ -8,11 +8,11 @@ use Illuminate\Database\Eloquent\Collection;
 interface ExamRepositoryInterface
 {
     /**
-     * Lista as provas com a contagem de questões e tentativas.
+     * Lista as provas de um professor com a contagem de questões e tentativas.
      *
      * @return Collection<int, Exam>
      */
-    public function allWithCounts(): Collection;
+    public function forTeacherWithCounts(int $teacherId): Collection;
 
     /**
      * Lista as provas disponíveis para um aluno, já com a tentativa dele

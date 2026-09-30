@@ -9,6 +9,7 @@ const session = useSessionStore()
 
 const teachers = ref([])
 const students = ref([])
+const selectedTeacher = ref(null)
 const selectedStudent = ref(null)
 const loading = ref(true)
 const error = ref(null)
@@ -18,6 +19,7 @@ onMounted(async () => {
     const [t, s] = await Promise.all([api.get('/teachers'), api.get('/students')])
     teachers.value = t.data.data
     students.value = s.data.data
+    selectedTeacher.value = teachers.value[0]?.id ?? null
     selectedStudent.value = students.value[0]?.id ?? null
   } catch {
     error.value = 'Não foi possível carregar os perfis. A API está no ar (http://localhost:8080)?'
@@ -27,7 +29,7 @@ onMounted(async () => {
 })
 
 function enterAsTeacher() {
-  const teacher = teachers.value[0]
+  const teacher = teachers.value.find((t) => t.id === selectedTeacher.value)
   if (!teacher) return
   session.enter('teacher', teacher.id, teacher.name)
   router.push({ name: 'teacher.exams' })
@@ -56,7 +58,10 @@ function enterAsStudent() {
         <div class="icon">👩‍🏫</div>
         <h2>Professor</h2>
         <p class="muted">Crie e gerencie provas e acompanhe o desempenho da turma.</p>
-        <p v-if="teachers[0]" class="who">Acessar como <strong>{{ teachers[0].name }}</strong></p>
+        <label for="teacher">Selecione o professor</label>
+        <select id="teacher" v-model="selectedTeacher">
+          <option v-for="t in teachers" :key="t.id" :value="t.id">{{ t.name }}</option>
+        </select>
         <button class="btn" :disabled="!teachers.length" @click="enterAsTeacher">
           Entrar como Professor
         </button>
@@ -87,7 +92,6 @@ function enterAsStudent() {
 .profile .icon { font-size: 2.5rem; }
 .profile select { margin-bottom: 0.3rem; }
 .profile .btn { margin-top: 0.4rem; width: 100%; justify-content: center; }
-.who { font-size: 0.85rem; }
 @media (max-width: 640px) {
   .cards { grid-template-columns: 1fr; }
   .home { margin-top: 1.5rem; }

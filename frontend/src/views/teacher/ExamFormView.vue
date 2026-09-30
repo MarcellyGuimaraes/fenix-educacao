@@ -13,6 +13,13 @@ const errors = ref({})
 const generalError = ref(null)
 // Provas já respondidas não podem ser editadas (a API responde 409).
 const locked = ref(false)
+// Prova de outro professor (a API responde 403): o formulário não é exibido.
+const forbidden = ref(false)
+
+function forbid(e) {
+  forbidden.value = true
+  generalError.value = e.response.data?.message || 'Esta prova pertence a outro professor.'
+}
 
 const form = ref({
   title: '',
@@ -58,8 +65,9 @@ async function load() {
         options: q.options.map((o) => ({ text: o.text, is_correct: o.is_correct })),
       })),
     }
-  } catch {
-    generalError.value = 'Erro ao carregar a prova.'
+  } catch (e) {
+    if (e.response?.status === 403) forbid(e)
+    else generalError.value = 'Erro ao carregar a prova.'
   } finally {
     loading.value = false
   }
@@ -80,6 +88,8 @@ async function submit() {
     if (e.response?.status === 422) {
       errors.value = e.response.data.errors || {}
       generalError.value = e.response.data.message || 'Corrija os campos destacados.'
+    } else if (e.response?.status === 403) {
+      forbid(e)
     } else if (e.response?.status === 409) {
       locked.value = true
       generalError.value = e.response.data.message || 'Esta prova já foi respondida e não pode ser editada.'
@@ -103,7 +113,7 @@ onMounted(load)
     </div>
     <div v-if="loading" class="muted">Carregando…</div>
 
-    <form v-else class="grid" @submit.prevent="submit">
+    <form v-else-if="!forbidden" class="grid" @submit.prevent="submit">
       <div class="card grid">
         <div>
           <label>Título</label>

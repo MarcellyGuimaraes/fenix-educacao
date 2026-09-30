@@ -219,4 +219,89 @@ class ExamManagementTest extends TestCase
 
         $this->assertDatabaseMissing('exams', ['id' => $exam->id]);
     }
+
+    public function test_listagem_mostra_apenas_provas_do_professor(): void
+    {
+        $mine = Exam::factory()->count(2)->create(['teacher_id' => $this->teacher->id]);
+        Exam::factory()->create(['teacher_id' => Teacher::factory()]);
+
+        $ids = $this->getJson('/api/exams', $this->headers())
+            ->assertOk()
+            ->assertJsonCount(2, 'data')
+            ->json('data.*.id');
+
+        $this->assertEqualsCanonicalizing($mine->pluck('id')->all(), $ids);
+    }
+
+    public function test_professor_sem_provas_recebe_lista_vazia(): void
+    {
+        Exam::factory()->create(['teacher_id' => Teacher::factory()]);
+
+        $this->getJson('/api/exams', $this->headers())
+            ->assertOk()
+            ->assertJsonCount(0, 'data');
+    }
+
+    public function test_nao_visualiza_prova_de_outro_professor(): void
+    {
+        $exam = Exam::factory()->create(['teacher_id' => Teacher::factory()]);
+
+        $this->getJson("/api/exams/{$exam->id}", $this->headers())
+            ->assertForbidden()
+            ->assertJsonPath('message', 'Esta prova pertence a outro professor.')
+            ->assertJsonMissingPath('data');
+    }
+
+    public function test_nao_edita_prova_de_outro_professor(): void
+    {
+        $exam = Exam::factory()->create(['teacher_id' => Teacher::factory(), 'title' => 'Alheia']);
+
+        $this->putJson("/api/exams/{$exam->id}", $this->validPayload(), $this->headers())
+            ->assertForbidden()
+            ->assertJsonPath('message', 'Esta prova pertence a outro professor.');
+
+        $this->assertDatabaseHas('exams', ['id' => $exam->id, 'title' => 'Alheia']);
+        $this->assertDatabaseMissing('questions', ['statement' => 'Quanto é 2 + 2?']);
+    }
+
+    public function test_payload_invalido_em_prova_de_outro_professor_retorna_403(): void
+    {
+        $exam = Exam::factory()->create(['teacher_id' => Teacher::factory()]);
+
+        $this->putJson("/api/exams/{$exam->id}", ['title' => ''], $this->headers())
+            ->assertForbidden();
+    }
+
+    public function test_prova_respondida_de_outro_professor_retorna_403_e_nao_409(): void
+    {
+        $exam = $this->examWithAttempt();
+        $other = Teacher::factory()->create();
+
+        $this->putJson("/api/exams/{$exam->id}", $this->validPayload(), [
+            'X-User-Role' => 'teacher',
+            'X-User-Id' => (string) $other->id,
+        ])->assertForbidden();
+
+        $this->assertDatabaseHas('exams', ['id' => $exam->id, 'title' => 'Original']);
+    }
+
+    public function test_nao_exclui_prova_de_outro_professor(): void
+    {
+        $exam = $this->examWithAttempt();
+        $other = Teacher::factory()->create();
+
+        $this->deleteJson("/api/exams/{$exam->id}", [], [
+            'X-User-Role' => 'teacher',
+            'X-User-Id' => (string) $other->id,
+        ])->assertForbidden();
+
+        $this->assertDatabaseHas('exams', ['id' => $exam->id]);
+        $this->assertDatabaseCount('exam_attempts', 1);
+        $this->assertDatabaseCount('attempt_answers', 1);
+    }
+
+    public function test_prova_inexistente_continua_404(): void
+    {
+        $this->getJson('/api/exams/999999', $this->headers())->assertNotFound();
+    }
 }

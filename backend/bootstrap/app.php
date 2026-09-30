@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Middleware\EnsureExamOwner;
 use App\Http\Middleware\EnsureProfile;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
@@ -16,6 +17,7 @@ return Application::configure(basePath: dirname(__DIR__))
     ->withMiddleware(function (Middleware $middleware): void {
         $middleware->alias([
             'profile' => EnsureProfile::class,
+            'exam.owner' => EnsureExamOwner::class,
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {

@@ -9,6 +9,7 @@ use App\Models\Exam;
 use App\Models\Teacher;
 use App\Services\ExamService;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 use Illuminate\Http\Response;
 use OpenApi\Attributes as OA;
@@ -22,7 +23,7 @@ class ExamController extends Controller
     #[OA\Get(
         path: '/exams',
         tags: ['Provas (Professor)'],
-        summary: 'Lista as provas com contadores',
+        summary: 'Lista as provas do professor identificado, com contadores',
         parameters: [
             new OA\Parameter(ref: '#/components/parameters/RoleHeader'),
             new OA\Parameter(ref: '#/components/parameters/UserIdHeader'),
@@ -38,9 +39,12 @@ class ExamController extends Controller
             new OA\Response(response: 403, description: 'Perfil não autorizado'),
         ]
     )]
-    public function index(): AnonymousResourceCollection
+    public function index(Request $request): AnonymousResourceCollection
     {
-        return ExamResource::collection($this->exams->list());
+        /** @var Teacher $teacher */
+        $teacher = $request->attributes->get('teacher');
+
+        return ExamResource::collection($this->exams->list($teacher));
     }
 
     #[OA\Post(
@@ -84,6 +88,7 @@ class ExamController extends Controller
             new OA\Response(response: 200, description: 'OK', content: new OA\JsonContent(properties: [
                 new OA\Property(property: 'data', ref: '#/components/schemas/Exam'),
             ])),
+            new OA\Response(response: 403, description: 'Prova de outro professor', content: new OA\JsonContent(ref: '#/components/schemas/Message')),
             new OA\Response(response: 404, description: 'Prova não encontrada'),
         ]
     )]
@@ -106,6 +111,8 @@ class ExamController extends Controller
             new OA\Response(response: 200, description: 'OK', content: new OA\JsonContent(properties: [
                 new OA\Property(property: 'data', ref: '#/components/schemas/Exam'),
             ])),
+            new OA\Response(response: 403, description: 'Prova de outro professor (verificado antes da validação)', content: new OA\JsonContent(ref: '#/components/schemas/Message')),
+            new OA\Response(response: 404, description: 'Prova não encontrada'),
             new OA\Response(response: 409, description: 'Prova já respondida não pode ser editada', content: new OA\JsonContent(properties: [
                 new OA\Property(property: 'message', type: 'string', example: 'Esta prova já foi respondida e não pode ser editada.'),
             ])),
@@ -128,6 +135,7 @@ class ExamController extends Controller
         ],
         responses: [
             new OA\Response(response: 204, description: 'Excluída'),
+            new OA\Response(response: 403, description: 'Prova de outro professor', content: new OA\JsonContent(ref: '#/components/schemas/Message')),
             new OA\Response(response: 404, description: 'Prova não encontrada'),
         ]
     )]

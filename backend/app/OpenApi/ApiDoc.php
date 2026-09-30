@@ -241,6 +241,58 @@ class RankingItemSchema
 }
 
 #[OA\Schema(
+    schema: 'ExamMetric',
+    properties: [
+        new OA\Property(property: 'exam_id', type: 'integer', example: 1),
+        new OA\Property(property: 'exam_title', type: 'string', example: 'Prova de Conhecimentos Gerais'),
+        new OA\Property(property: 'attempts_count', type: 'integer', example: 3),
+        new OA\Property(property: 'average_percentage', type: 'number', format: 'float', nullable: true, example: 66.67),
+        new OA\Property(property: 'best_percentage', type: 'number', format: 'float', nullable: true, example: 100),
+        new OA\Property(property: 'worst_percentage', type: 'number', format: 'float', nullable: true, example: 33.33),
+    ]
+)]
+class ExamMetricSchema
+{
+}
+
+#[OA\Schema(
+    schema: 'StudentAverage',
+    properties: [
+        new OA\Property(property: 'student_id', type: 'integer', example: 2),
+        new OA\Property(property: 'student_name', type: 'string', example: 'Maria Oliveira'),
+        new OA\Property(property: 'attempts_count', type: 'integer', example: 2),
+        new OA\Property(property: 'average_percentage', type: 'number', format: 'float', example: 90),
+        new OA\Property(property: 'difference_from_average', type: 'number', format: 'float', description: 'Média do aluno menos a média geral, em pontos percentuais', example: 20),
+    ]
+)]
+class StudentAverageSchema
+{
+}
+
+#[OA\Schema(
+    schema: 'PaginationMeta',
+    properties: [
+        new OA\Property(property: 'current_page', type: 'integer'),
+        new OA\Property(property: 'last_page', type: 'integer'),
+        new OA\Property(property: 'per_page', type: 'integer'),
+        new OA\Property(property: 'total', type: 'integer'),
+    ]
+)]
+class PaginationMetaSchema
+{
+}
+
+#[OA\Schema(
+    schema: 'Message',
+    properties: [
+        new OA\Property(property: 'message', type: 'string', example: 'Esta prova pertence a outro professor.'),
+    ]
+)]
+class MessageSchema
+{
+}
+
+#[OA\Schema(
     schema: 'ValidationError',
     properties: [
         new OA\Property(property: 'message', type: 'string', example: 'Cada questão deve ter exatamente uma alternativa correta.'),

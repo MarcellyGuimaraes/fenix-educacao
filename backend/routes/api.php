@@ -13,9 +13,16 @@ Route::get('students', [ProfileController::class, 'students']);
 
 // Área do professor.
 Route::middleware('profile:teacher')->group(function (): void {
-    Route::apiResource('exams', ExamController::class);
+    Route::apiResource('exams', ExamController::class)->only(['index', 'store']);
+
+    // Visualizar, editar e excluir: só o professor autor da prova.
+    Route::apiResource('exams', ExamController::class)
+        ->only(['show', 'update', 'destroy'])
+        ->middleware('exam.owner');
 
     Route::get('dashboard/summary', [DashboardController::class, 'summary']);
+    Route::get('dashboard/exams', [DashboardController::class, 'exams']);
+    Route::get('dashboard/students', [DashboardController::class, 'students']);
     Route::get('dashboard/ranking', [DashboardController::class, 'ranking']);
 });
 
