@@ -13,7 +13,16 @@ use Illuminate\Database\Eloquent\Collection;
  */
 interface DashboardRepositoryInterface
 {
+    /**
+     * Média por tentativa: cada tentativa tem o mesmo peso.
+     */
     public function averagePercentage(int $teacherId): float;
+
+    /**
+     * Média das provas: média das médias de cada prova com tentativas, cada
+     * prova com o mesmo peso.
+     */
+    public function examsAveragePercentage(int $teacherId): float;
 
     public function totalAttempts(int $teacherId): int;
 
@@ -46,7 +55,9 @@ interface DashboardRepositoryInterface
 
     /**
      * Média de cada aluno nas provas do professor, paginada. Cada linha traz
-     * `student_id`, `student_name`, `attempts_count` e `average_percentage`.
+     * `student_id`, `student_name`, `attempts_count`, `average_percentage` e
+     * `difference_from_exam_average` (média de "percentual do aluno − média
+     * da prova" nas tentativas dele), ordenada pelo maior desvio.
      *
      * @return LengthAwarePaginator<int, ExamAttempt>
      */

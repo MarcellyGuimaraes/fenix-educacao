@@ -206,7 +206,8 @@ class AttemptResultSchema
 #[OA\Schema(
     schema: 'DashboardSummary',
     properties: [
-        new OA\Property(property: 'average_percentage', type: 'number', format: 'float', example: 55.56),
+        new OA\Property(property: 'exams_average_percentage', type: 'number', format: 'float', description: 'Média das provas: média das médias de cada prova com tentativas (cada prova com o mesmo peso)', example: 65),
+        new OA\Property(property: 'average_percentage', type: 'number', format: 'float', description: 'Média por tentativa: cada tentativa com o mesmo peso', example: 55.56),
         new OA\Property(property: 'total_attempts', type: 'integer', example: 3),
         new OA\Property(property: 'best', type: 'object', nullable: true, properties: [
             new OA\Property(property: 'student_name', type: 'string'),
@@ -262,7 +263,7 @@ class ExamMetricSchema
         new OA\Property(property: 'student_name', type: 'string', example: 'Maria Oliveira'),
         new OA\Property(property: 'attempts_count', type: 'integer', example: 2),
         new OA\Property(property: 'average_percentage', type: 'number', format: 'float', example: 90),
-        new OA\Property(property: 'difference_from_average', type: 'number', format: 'float', description: 'Média do aluno menos a média geral, em pontos percentuais', example: 20),
+        new OA\Property(property: 'difference_from_exam_average', type: 'number', format: 'float', description: 'Média, nas tentativas do aluno, de "percentual do aluno − média daquela prova", em pontos percentuais (comparação prova a prova)', example: 17.5),
     ]
 )]
 class StudentAverageSchema

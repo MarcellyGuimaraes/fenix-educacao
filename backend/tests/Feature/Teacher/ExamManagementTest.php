@@ -6,6 +6,7 @@ use App\Models\Exam;
 use App\Models\ExamAttempt;
 use App\Models\Student;
 use App\Models\Teacher;
+use Illuminate\Database\QueryException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -218,6 +219,36 @@ class ExamManagementTest extends TestCase
             ->assertNoContent();
 
         $this->assertDatabaseMissing('exams', ['id' => $exam->id]);
+    }
+
+    public function test_nao_exclui_prova_ja_respondida(): void
+    {
+        $exam = $this->examWithAttempt();
+        $attempt = ExamAttempt::query()->firstOrFail();
+
+        $this->deleteJson("/api/exams/{$exam->id}", [], $this->headers())
+            ->assertStatus(409)
+            ->assertJsonPath('message', 'Esta prova já foi respondida e não pode ser excluída.');
+
+        // O histórico continua íntegro e acessível ao aluno.
+        $this->assertDatabaseHas('exams', ['id' => $exam->id]);
+        $this->assertDatabaseCount('exam_attempts', 1);
+        $this->assertDatabaseCount('attempt_answers', 1);
+
+        $this->getJson("/api/student/attempts/{$attempt->id}", [
+            'X-User-Role' => 'student',
+            'X-User-Id' => (string) $attempt->student_id,
+        ])->assertOk()->assertJsonCount(1, 'data.answers');
+    }
+
+    public function test_banco_impede_excluir_prova_com_tentativas(): void
+    {
+        $exam = $this->examWithAttempt();
+
+        // Mesmo fora da API, a FK restritiva preserva o histórico.
+        $this->expectException(QueryException::class);
+
+        $exam->delete();
     }
 
     public function test_listagem_mostra_apenas_provas_do_professor(): void

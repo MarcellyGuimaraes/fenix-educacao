@@ -23,7 +23,7 @@ class DashboardController extends Controller
     #[OA\Get(
         path: '/dashboard/summary',
         tags: ['Dashboard (Professor)'],
-        summary: 'Métricas gerais das provas do professor: média, melhor (Top 1), pior e total',
+        summary: 'Métricas gerais das provas do professor: média das provas, média por tentativa, melhor (Top 1), pior e total',
         parameters: [
             new OA\Parameter(ref: '#/components/parameters/RoleHeader'),
             new OA\Parameter(ref: '#/components/parameters/UserIdHeader'),
@@ -61,7 +61,7 @@ class DashboardController extends Controller
     #[OA\Get(
         path: '/dashboard/students',
         tags: ['Dashboard (Professor)'],
-        summary: 'Aluno × média: média de cada aluno e diferença para a média geral, paginado',
+        summary: 'Aluno × média: média de cada aluno e desvio médio em relação à média de cada prova que ele fez, paginado',
         parameters: [
             new OA\Parameter(ref: '#/components/parameters/RoleHeader'),
             new OA\Parameter(ref: '#/components/parameters/UserIdHeader'),
