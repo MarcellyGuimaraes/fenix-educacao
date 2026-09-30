@@ -97,4 +97,27 @@ class DashboardTest extends TestCase
         $this->getJson('/api/dashboard/summary', $this->headers())
             ->assertJsonPath('data.total_attempts', 2);
     }
+
+    public function test_excluir_prova_invalida_o_cache_do_dashboard(): void
+    {
+        $this->attempt(100, 10);
+        $this->attempt(50, 5);
+
+        // Primeiras leituras populam o cache.
+        $this->getJson('/api/dashboard/summary', $this->headers())
+            ->assertJsonPath('data.total_attempts', 2);
+        $this->getJson('/api/dashboard/ranking', $this->headers())
+            ->assertJsonPath('meta.total', 2);
+
+        // Excluir a prova remove as tentativas em cascata e deve invalidar o cache.
+        $this->deleteJson("/api/exams/{$this->exam->id}", [], $this->headers())
+            ->assertNoContent();
+
+        $this->getJson('/api/dashboard/summary', $this->headers())
+            ->assertJsonPath('data.total_attempts', 0)
+            ->assertJsonPath('data.best', null);
+        $this->getJson('/api/dashboard/ranking', $this->headers())
+            ->assertJsonPath('meta.total', 0)
+            ->assertJsonCount(0, 'data');
+    }
 }

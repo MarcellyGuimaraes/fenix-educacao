@@ -51,10 +51,18 @@ onMounted(load)
       <div v-for="exam in exams" :key="exam.id" class="card row">
         <div>
           <h3>{{ exam.title }}</h3>
-          <p class="muted">{{ exam.questions_count }} questões · {{ exam.attempts_count }} tentativas</p>
+          <p class="muted">
+            {{ exam.questions_count }} questões · {{ exam.attempts_count }} tentativas
+            <template v-if="exam.attempts_count > 0"> · edição bloqueada (prova já respondida)</template>
+          </p>
         </div>
         <div class="spacer"></div>
-        <button class="btn secondary" @click="router.push({ name: 'teacher.exams.edit', params: { id: exam.id } })">
+        <button
+          class="btn secondary"
+          :disabled="exam.attempts_count > 0"
+          :title="exam.attempts_count > 0 ? 'Provas já respondidas não podem ser editadas.' : null"
+          @click="router.push({ name: 'teacher.exams.edit', params: { id: exam.id } })"
+        >
           Editar
         </button>
         <button class="btn danger" @click="remove(exam)">Excluir</button>

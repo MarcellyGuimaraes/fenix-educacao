@@ -9,6 +9,7 @@ use App\Models\Student;
 use App\Repositories\Contracts\ExamAttemptRepositoryInterface;
 use App\Repositories\Contracts\ExamRepositoryInterface;
 use Illuminate\Database\Eloquent\Collection;
+use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
@@ -97,9 +98,19 @@ class ExamAttemptService
         $total = $questions->count();
         $percentage = round(($score / $total) * 100, 2);
 
-        $attempt = DB::transaction(
-            fn (): ExamAttempt => $this->attempts->createWithAnswers($exam, $student, $score, $total, $percentage, $rows)
-        );
+        try {
+            $attempt = DB::transaction(function () use ($exam, $student, $score, $total, $percentage, $rows): ExamAttempt {
+                // Trava a linha da prova: serializa com uma edição concorrente
+                // (ver ExamService::update), que apagaria as questões.
+                Exam::query()->whereKey($exam->id)->lockForUpdate()->first();
+
+                return $this->attempts->createWithAnswers($exam, $student, $score, $total, $percentage, $rows);
+            });
+        } catch (UniqueConstraintViolationException) {
+            // Envio concorrente passou pela verificação acima; o índice único
+            // (exam_id, student_id) é a garantia final → mesmo 409 do caso comum.
+            throw new ExamAlreadyAttemptedException;
+        }
 
         // Uma nova tentativa muda as métricas → invalida o cache do dashboard.
         $this->dashboard->flushCache();

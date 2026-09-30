@@ -3,6 +3,8 @@
 namespace Tests\Feature\Teacher;
 
 use App\Models\Exam;
+use App\Models\ExamAttempt;
+use App\Models\Student;
 use App\Models\Teacher;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
@@ -145,6 +147,67 @@ class ExamManagementTest extends TestCase
 
         $this->assertDatabaseMissing('questions', ['statement' => 'Antiga']);
         $this->assertDatabaseHas('questions', ['statement' => 'Quanto é 2 + 2?']);
+    }
+
+    /**
+     * Prova com uma questão e uma tentativa já registrada (com resposta).
+     */
+    private function examWithAttempt(): Exam
+    {
+        $exam = Exam::factory()->create(['teacher_id' => $this->teacher->id, 'title' => 'Original']);
+        $question = $exam->questions()->create(['statement' => 'Antiga', 'order' => 1]);
+        $correct = $question->options()->create(['text' => 'A', 'is_correct' => true, 'order' => 1]);
+        $question->options()->create(['text' => 'B', 'is_correct' => false, 'order' => 2]);
+
+        $attempt = ExamAttempt::factory()->create([
+            'exam_id' => $exam->id,
+            'student_id' => Student::factory(),
+            'score' => 1,
+            'total_questions' => 1,
+            'percentage' => 100,
+        ]);
+        $attempt->answers()->create([
+            'question_id' => $question->id,
+            'option_id' => $correct->id,
+            'is_correct' => true,
+        ]);
+
+        return $exam;
+    }
+
+    public function test_nao_edita_prova_ja_respondida(): void
+    {
+        $exam = $this->examWithAttempt();
+
+        $this->putJson("/api/exams/{$exam->id}", $this->validPayload(), $this->headers())
+            ->assertStatus(409)
+            ->assertJsonPath('message', 'Esta prova já foi respondida e não pode ser editada.');
+
+        $this->assertDatabaseHas('exams', ['id' => $exam->id, 'title' => 'Original']);
+        $this->assertDatabaseHas('questions', ['exam_id' => $exam->id, 'statement' => 'Antiga']);
+        $this->assertDatabaseMissing('questions', ['statement' => 'Quanto é 2 + 2?']);
+        $this->assertDatabaseCount('attempt_answers', 1);
+    }
+
+    public function test_payload_invalido_em_prova_respondida_retorna_422(): void
+    {
+        $exam = $this->examWithAttempt();
+
+        $this->putJson("/api/exams/{$exam->id}", ['title' => ''], $this->headers())
+            ->assertStatus(422)
+            ->assertJsonValidationErrors(['title', 'questions']);
+
+        $this->assertDatabaseHas('exams', ['id' => $exam->id, 'title' => 'Original']);
+        $this->assertDatabaseCount('attempt_answers', 1);
+    }
+
+    public function test_detalhe_da_prova_expoe_contador_de_tentativas(): void
+    {
+        $exam = $this->examWithAttempt();
+
+        $this->getJson("/api/exams/{$exam->id}", $this->headers())
+            ->assertOk()
+            ->assertJsonPath('data.attempts_count', 1);
     }
 
     public function test_exclui_prova(): void
