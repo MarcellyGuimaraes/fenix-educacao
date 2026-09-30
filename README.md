@@ -2,7 +2,9 @@
 
 Aplicação fullstack de **provas online**: professores criam provas de múltipla
 escolha, alunos respondem e recebem **correção automática**, e um **dashboard**
-mostra o desempenho da turma (média, melhor pontuação e ranking).
+mostra o desempenho da turma (média geral e por prova, melhor e pior pontuação,
+média de cada aluno e ranking filtrável por prova). Cada professor vê apenas as
+próprias provas e métricas.
 
 Projeto do desafio técnico **Fênix – Desenvolvedor**.
 
@@ -17,7 +19,7 @@ Projeto do desafio técnico **Fênix – Desenvolvedor**.
 | Banco | PostgreSQL 16 |
 | Cache | Redis 7 |
 | Ambiente | Docker / Docker Compose |
-| Testes | PHPUnit (~94% de cobertura) |
+| Testes | PHPUnit (~96% de cobertura) |
 | Documentação | Swagger / OpenAPI (l5-swagger) |
 
 ---
@@ -119,7 +121,8 @@ docker compose down
 ## Perfis e acesso
 
 Conforme o enunciado, **não há login**: existem dois acessos (Professor e Aluno).
-Na tela inicial escolhe-se o perfil; internamente cada requisição às áreas
+Na tela inicial escolhe-se o perfil e, em cada um, quem está acessando (há um
+seletor de professor e um de aluno); internamente cada requisição às áreas
 protegidas envia os headers:
 
 - `X-User-Role`: `teacher` ou `student`
@@ -127,6 +130,17 @@ protegidas envia os headers:
 
 Os ids disponíveis vêm de `GET /api/teachers` e `GET /api/students` (populados
 pelo seeder). Veja também a seção *Decisões técnicas* sobre segurança.
+
+Dados de exemplo do seeder:
+
+| Perfil | Quem | Provas |
+|---|---|---|
+| Professor | Prof. Ana Souza | Conhecimentos Gerais, Lógica de Programação |
+| Professor | Prof. Bruno Costa | História do Brasil |
+| Aluno | João Silva, Maria Oliveira, Pedro Santos, Carla Lima, Lucas Rocha | — |
+
+> Entrar como cada professor mostra o isolamento: um não vê as provas nem as
+> métricas do outro.
 
 ---
 
@@ -140,7 +154,7 @@ Duas aplicações independentes conversando por API REST (JSON).
 ### Backend — camadas (evitando *fat controllers*)
 
 ```
-Rota → Middleware (perfil) → Controller → Form Request (validação)
+Rota → Middleware (perfil, dono da prova) → Controller → Form Request (validação)
      → Service (regra de negócio) → Repository (acesso a dados) → Model
      ← API Resource (serialização de saída)
 ```
@@ -158,8 +172,9 @@ Rota → Middleware (perfil) → Controller → Form Request (validação)
 ### Frontend
 
 Vue 3 + Vue Router (com guarda de perfil) + Pinia (sessão) + Axios (interceptor
-que injeta os headers de perfil). Telas de professor (provas + dashboard) e
-aluno (responder + resultado).
+que injeta os headers de perfil). Telas de professor (provas + dashboard com
+resumo, média por prova, aluno × média e ranking com filtro de prova) e aluno
+(responder + resultado).
 
 ---
 
@@ -229,7 +244,7 @@ registrar uma nova tentativa ou excluir uma prova, o cache do dashboard é
 
 ## Testes
 
-Suíte com **~94% de cobertura**, isolada em SQLite em memória + cache array
+Suíte com **~96% de cobertura**, isolada em SQLite em memória + cache array
 (não toca o Postgres/Redis reais). Roda no container padrão mesmo com a config
 em cache: o `phpunit.xml` aponta os caches para arquivos que nunca são gerados.
 
@@ -273,6 +288,19 @@ docker compose exec app php artisan cache:clear
   muda-se o middleware + um endpoint de sessão, sem tocar controllers/services.
   > ⚠️ Headers são falsificáveis — não é seguro para produção; é uma
   > simplificação consciente do escopo do desafio.
+- **Dono da prova num middleware** (`exam.owner`): roda antes da validação do
+  Form Request, então quem não é o dono recebe `403` e nunca um `422`/`409` que
+  revelaria detalhes da prova. O mesmo teste (`Exam::isOwnedBy`) protege o
+  filtro do ranking.
+- **Ids validados antes do banco**: `{exam}`/`{attempt}` têm restrição de formato
+  na rota e o `X-User-Id` é validado no middleware (`App\Support\Identifier`).
+  Capturar o erro do banco dependeria do driver (o SQLite dos testes nem falha)
+  e mascararia erros reais.
+- **Métricas agregadas no banco**: média por prova e aluno × média saem de
+  `COUNT`/`AVG`/`MAX`/`MIN` em uma query cada, não de laços em PHP.
+- **Cache por professor, invalidação global**: as chaves incluem o professor,
+  mas uma nova tentativa ou exclusão limpa a tag `dashboard` inteira. É mais
+  simples que uma tag por professor e barato neste volume (TTL de 5 min).
 - **DTO no cache do ranking**: cacheamos uma estrutura serializável (linhas +
   meta), nunca o objeto paginador do Laravel (que não sobrevive à
   (des)serialização no cache).
